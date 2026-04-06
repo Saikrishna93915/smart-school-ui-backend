@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 import Teacher from "../models/Teacher.js";
 import User from "../models/User.js";
+import { generateDefaultPassword, getNextSequenceNumber } from "../utils/passwordGenerator.js";
 
 /* =========================================================
    CREATE TEACHER (COMPLETE WORKING VERSION)
@@ -40,6 +40,11 @@ export const createTeacher = async (req, res) => {
       professional
     } = req.body;
 
+    // ===== GENERATE DEFAULT PASSWORD FOR TEACHER =====
+    const sequenceNumber = await getNextSequenceNumber(User, 'teacher');
+    const defaultPassword = generateDefaultPassword('teacher', sequenceNumber);
+    console.log(`🔐 Generated default password for teacher: ${defaultPassword} (sequence: ${sequenceNumber})`);
+
     // ===== UNIFY THE DATA =====
     const unifiedData = {
       firstName: personal?.firstName || flatFirstName,
@@ -57,7 +62,7 @@ export const createTeacher = async (req, res) => {
       emergencyContact: personal?.emergencyContact || flatEmergencyContact || "",
       joiningDate: personal?.joiningDate || flatJoiningDate || new Date().toISOString().split('T')[0],
       status: flatStatus || "active",
-      password: password || "Teacher@123"
+      password: defaultPassword // Use the generated default password
     };
 
     console.log("🔧 Unified Data:", unifiedData);
@@ -136,25 +141,23 @@ export const createTeacher = async (req, res) => {
 
     console.log("✅ No duplicates found");
 
-    // ===== CREATE USER (WITH MANUAL PASSWORD HASHING) =====
-    console.log("🔐 Hashing password manually...");
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(unifiedData.password, salt);
-    console.log("✅ Password hashed manually");
+    // ===== CREATE USER =====
+    // Important: pass plain password here. User model pre-save hook hashes it once.
+    // Avoid manual hashing here to prevent double-hash and login failures.
 
     const user = new User({
       name: `${formattedFirstName} ${formattedLastName}`.trim(),
       username: lowerEmail,
       email: lowerEmail,
       phone: unifiedData.phone.trim(),
-      password: hashedPassword,
+      password: unifiedData.password,
       role: "teacher",
       linkedId: null,
       forcePasswordChange: true,
       active: unifiedData.status === "active"
     });
 
-    console.log("📝 Creating user with hashed password...");
+    console.log("📝 Creating user account...");
     
     // Save user with pre-save middleware disabled for password
     await user.save({ validateBeforeSave: true });
@@ -208,7 +211,7 @@ export const createTeacher = async (req, res) => {
     // ===== SUCCESS RESPONSE =====
     res.status(201).json({
       success: true,
-      message: "Teacher created successfully",
+      message: "Teacher created successfully with default password",
       data: {
         _id: teacher._id,
         employeeId: teacher.employeeId,
@@ -220,6 +223,12 @@ export const createTeacher = async (req, res) => {
         status: teacher.status,
         createdAt: teacher.createdAt,
         updatedAt: teacher.updatedAt
+      },
+      credentials: {
+        email: lowerEmail,
+        defaultPassword: defaultPassword,
+        forcePasswordChange: true,
+        note: "The teacher must change this password on first login"
       }
     });
 

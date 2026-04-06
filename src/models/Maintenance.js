@@ -71,8 +71,7 @@ const maintenanceSchema = new mongoose.Schema({
 //   next();
 // });
 
-// Indexes
-maintenanceSchema.index({ maintenanceId: 1 });
+// Indexes - Removed duplicates (unique fields already create indexes)
 maintenanceSchema.index({ vehicle: 1 });
 maintenanceSchema.index({ status: 1 });
 maintenanceSchema.index({ priority: 1 });

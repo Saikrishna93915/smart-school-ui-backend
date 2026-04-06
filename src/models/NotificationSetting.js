@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const notificationSettingSchema = new mongoose.Schema({
   schoolId: {
@@ -161,4 +161,4 @@ notificationSettingSchema.methods.shouldSendNow = function() {
   }
 };
 
-module.exports = mongoose.model('NotificationSetting', notificationSettingSchema);
+export default mongoose.model('NotificationSetting', notificationSettingSchema);

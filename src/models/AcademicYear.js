@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const academicYearSchema = new mongoose.Schema({
   schoolId: {
@@ -143,7 +143,7 @@ const academicYearSchema = new mongoose.Schema({
 });
 
 // Ensure only one current academic year per school
-academicYearSchema.pre('save', async function(next) {
+academicYearSchema.pre('save', async function() {
   if (this.isCurrent) {
     await this.constructor.updateMany(
       { schoolId: this.schoolId, _id: { $ne: this._id } },
@@ -153,10 +153,8 @@ academicYearSchema.pre('save', async function(next) {
   
   // Validate dates
   if (this.startDate >= this.endDate) {
-    next(new Error('Start date must be before end date'));
+    throw new Error('Start date must be before end date');
   }
-  
-  next();
 });
 
 // Static method to get current academic year
@@ -179,4 +177,4 @@ academicYearSchema.methods.getActiveTerm = function() {
   );
 };
 
-module.exports = mongoose.model('AcademicYear', academicYearSchema);
+export default mongoose.model('AcademicYear', academicYearSchema);

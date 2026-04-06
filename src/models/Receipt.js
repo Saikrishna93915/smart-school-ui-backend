@@ -97,23 +97,23 @@ const receiptSchema = new mongoose.Schema(
     schoolDetails: {
       name: {
         type: String,
-        default: "AI School ERP",
+        default: "PMC Tech School",
       },
       address: {
         type: String,
-        default: "123 Education Street, Smart City, Karnataka 560001",
+        default: "Hosur - Krishnagiri Highways, Nallaganakothapalli, Near Koneripalli (PO), Hosur, Krishnagiri District, Tamil Nadu - 635 117",
       },
       phone: {
         type: String,
-        default: "+91 98765 43210",
+        default: "+91 XXXXXXXXXX",
       },
       email: {
         type: String,
-        default: "accounts@aischoolerp.edu.in",
+        default: "office@pmctechschool.com",
       },
       principal: {
         type: String,
-        default: "Dr. S. Krishnan",
+        default: "Principal Name",
       },
       registrationNo: {
         type: String,
@@ -186,11 +186,11 @@ receiptSchema.pre("save", function (next) {
   // Ensure all required school details have defaults
   if (!this.schoolDetails || !this.schoolDetails.name) {
     this.schoolDetails = {
-      name: "AI School ERP",
-      address: "123 Education Street, Smart City, Karnataka 560001",
-      phone: "+91 98765 43210",
-      email: "accounts@aischoolerp.edu.in",
-      principal: "Dr. S. Krishnan",
+      name: "PMC Tech School",
+      address: "Hosur - Krishnagiri Highways, Nallaganakothapalli, Near Koneripalli (PO), Hosur, Krishnagiri District, Tamil Nadu - 635 117",
+      phone: "+91 XXXXXXXXXX",
+      email: "office@pmctechschool.com",
+      principal: "Principal Name",
       registrationNo: "REG-EDU-2024-001",
       gstin: "29AAACI0000A1Z5",
     };

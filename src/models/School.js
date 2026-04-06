@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const schoolSchema = new mongoose.Schema({
   name: {
@@ -162,13 +162,12 @@ schoolSchema.virtual('fullAddress').get(function() {
 });
 
 // Pre-save middleware to generate school code
-schoolSchema.pre('save', async function(next) {
+schoolSchema.pre('save', async function() {
   if (!this.code) {
     const year = new Date().getFullYear();
     const count = await this.constructor.countDocuments();
     this.code = `SS-${year}-${String(count + 1).padStart(4, '0')}`;
   }
-  next();
 });
 
 // Static method to get active schools
@@ -176,4 +175,9 @@ schoolSchema.statics.getActiveSchools = function() {
   return this.find({ status: 'active' }).select('name code email phone status');
 };
 
-module.exports = mongoose.model('School', schoolSchema);
+// Static method to get by ID with full details
+schoolSchema.statics.getFullById = function(id) {
+  return this.findById(id).populate('metadata.createdBy metadata.updatedBy', 'name email');
+};
+
+export default mongoose.model('School', schoolSchema);

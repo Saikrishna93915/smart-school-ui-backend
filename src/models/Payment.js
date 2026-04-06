@@ -7,7 +7,6 @@ const paymentSchema = new mongoose.Schema(
     admissionNumber: {
       type: String,
       required: true,
-      index: true,
     },
     studentId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -57,7 +56,7 @@ const paymentSchema = new mongoose.Schema(
     // Payment Status
     status: {
       type: String,
-      enum: ["pending", "partial", "paid", "overdue", "cancelled"],
+      enum: ["pending", "partial", "paid", "completed", "overdue", "cancelled"],
       default: "pending",
     },
     
@@ -74,7 +73,23 @@ const paymentSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
-    
+
+    // Cashier/Collector Information
+    collectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    cashierName: {
+      type: String,
+    },
+    cashierId: {
+      type: String,
+    },
+    shiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ShiftSession",
+    },
+
     // Payment Method
     paymentMethod: {
       type: String,
@@ -147,16 +162,21 @@ const paymentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    voidReason: String,
+    voidedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidedAt: Date,
   },
   { timestamps: true }
 );
 
-// Create indexes
+// Create indexes - Removed duplicates (unique/sparse fields already create indexes)
 paymentSchema.index({ admissionNumber: 1 });
 paymentSchema.index({ academicYear: 1 });
 paymentSchema.index({ status: 1 });
 paymentSchema.index({ paymentDate: -1 });
-paymentSchema.index({ receiptNumber: 1 }, { unique: true, sparse: true });
 
 // Pre-save middleware to calculate dueAmount if not set
 paymentSchema.pre("save", function (next) {

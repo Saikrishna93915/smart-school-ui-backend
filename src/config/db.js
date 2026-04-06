@@ -6,12 +6,15 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    if (!process.env.MONGO_URI) {
-      throw new Error("❌ MONGO_URI is missing in environment variables");
+    // Use MongoDB Atlas (production) with local fallback
+    const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+    
+    if (!mongoUri) {
+      throw new Error("❌ MONGODB_URI or MONGO_URI is missing in environment variables");
     }
 
     // Mongoose 7+ (no extra options needed)
-    const conn = await mongoose.connect(process.env.MONGO_URI);
+    const conn = await mongoose.connect(mongoUri);
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`);
   } catch (error) {

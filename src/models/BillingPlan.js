@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const billingPlanSchema = new mongoose.Schema({
   schoolId: {
@@ -293,4 +293,4 @@ billingPlanSchema.statics.findBySchool = function(schoolId) {
   return this.findOne({ schoolId });
 };
 
-module.exports = mongoose.model('BillingPlan', billingPlanSchema);
+export default mongoose.model('BillingPlan', billingPlanSchema);

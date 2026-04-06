@@ -1,16 +1,14 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const systemHealthSchema = new mongoose.Schema({
   schoolId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'School',
-    required: true,
-    index: true
+    required: true
   },
   timestamp: {
     type: Date,
-    default: Date.now,
-    index: true
+    default: Date.now
   },
   uptime: {
     type: Number, // percentage
@@ -81,7 +79,7 @@ const systemHealthSchema = new mongoose.Schema({
     concurrent: Number,
     newToday: Number
   },
-  errors: [{
+  errorLogs: [{
     type: String,
     message: String,
     count: Number,
@@ -192,4 +190,4 @@ systemHealthSchema.pre('save', function(next) {
   next();
 });
 
-module.exports = mongoose.model('SystemHealth', systemHealthSchema);
+export default mongoose.model('SystemHealth', systemHealthSchema);

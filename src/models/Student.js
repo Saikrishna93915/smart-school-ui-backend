@@ -49,6 +49,12 @@ const StudentSchema = new mongoose.Schema(
       default: "active",
     },
 
+    transport: {
+      type: String,
+      enum: ["yes", "no"],
+      default: "no",
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -2,6 +2,24 @@ import asyncHandler from "../utils/asyncHandler.js";
 import Payment from "../models/Payment.js";
 import mongoose from "mongoose";
 
+const normalizeReceiptNumber = (value = '') => {
+  let normalized = decodeURIComponent(String(value)).trim();
+
+  if (normalized.length % 2 === 0) {
+    const half = normalized.length / 2;
+    if (normalized.slice(0, half) === normalized.slice(half)) {
+      normalized = normalized.slice(0, half);
+    }
+  }
+
+  const standardMatch = normalized.match(/(REC-\d+-\d+|CREDIT-\d+-\d+|INST-\d+-\d+)/i);
+  if (standardMatch?.[1]) {
+    return standardMatch[1];
+  }
+
+  return normalized;
+};
+
 // @desc    Get payment history with filters
 // @route   GET /api/history/payments
 // @access  Private (Admin/Finance)
@@ -16,6 +34,7 @@ export const getPaymentHistory = asyncHandler(async (req, res) => {
       startDate,
       endDate,
       className,
+      includeCredits = 'false',
       page = 1,
       limit = 20,
       sortBy = 'paymentDate',
@@ -24,6 +43,13 @@ export const getPaymentHistory = asyncHandler(async (req, res) => {
 
     // Build filter object
     const filter = {};
+
+    // By default, exclude credit notes from payment history
+    const shouldIncludeCredits = String(includeCredits).toLowerCase() === 'true';
+    if (!shouldIncludeCredits) {
+      filter.paymentType = { $ne: 'credit' };
+      filter.receiptNumber = { $not: /^CREDIT-/i };
+    }
 
     // Search filter
     if (search && search.trim()) {
@@ -478,7 +504,7 @@ export const exportPaymentHistory = asyncHandler(async (req, res) => {
 // @access  Private (Admin/Finance)
 export const getReceiptByNumber = asyncHandler(async (req, res) => {
   try {
-    const { receiptNumber } = req.params;
+    const receiptNumber = normalizeReceiptNumber(req.params.receiptNumber);
 
     console.log(`🔍 Looking for receipt: ${receiptNumber}`);
 

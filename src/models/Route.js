@@ -104,8 +104,7 @@ const routeSchema = new mongoose.Schema(
 //   next();
 // });
 
-// Indexes
-routeSchema.index({ routeNo: 1 });
+// Indexes - Removed duplicates (unique fields already create indexes)
 routeSchema.index({ zone: 1 });
 routeSchema.index({ status: 1 });
 routeSchema.index({ assignedVehicle: 1 });

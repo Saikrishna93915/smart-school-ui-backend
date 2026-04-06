@@ -15,22 +15,22 @@ import { authorize } from "../middlewares/roleMiddleware.js";
 
 const router = express.Router();
 
-// Apply global middleware for all student routes
-router.use(protect, authorize("admin", "owner"));
+// Apply authentication for all student routes
+router.use(protect);
 
 // Primary CRUD Routes
-router.get("/", getStudents);
-router.post("/", createStudent); // Handles single student insert
+router.get("/", authorize("admin", "owner", "teacher"), getStudents);
+router.post("/", authorize("admin", "owner"), createStudent); // Handles single student insert
 
 // Bulk Insert Route (MUST use this endpoint for the array of students)
-router.post("/bulk", createBulkStudents); // <--- NEW BULK ROUTE
+router.post("/bulk", authorize("admin", "owner"), createBulkStudents); // <--- NEW BULK ROUTE
 
 // Specific Query and ID Routes
-router.get("/by-admission/:admissionNumber", getByAdmissionNumber);
+router.get("/by-admission/:admissionNumber", authorize("admin", "owner", "teacher"), getByAdmissionNumber);
 
-router.get("/:id", getStudentById);
-router.put("/:id", updateStudent);
-router.put("/:id/status", updateStudentStatus);
-router.delete("/:id", softDeleteStudent);
+router.get("/:id", authorize("admin", "owner", "teacher"), getStudentById);
+router.put("/:id", authorize("admin", "owner"), updateStudent);
+router.put("/:id/status", authorize("admin", "owner"), updateStudentStatus);
+router.delete("/:id", authorize("admin", "owner"), softDeleteStudent);
 
 export default router;

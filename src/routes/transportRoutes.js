@@ -16,6 +16,7 @@ import {
   getDriverStats,
   getAllRoutes,
   createRoute,
+  updateRoute,
   getRouteStats,
   getAllMaintenance,
   createMaintenance,
@@ -60,6 +61,7 @@ router.get("/drivers-stats", protect, getDriverStats);
 // =================== ROUTE ROUTES ===================
 router.get("/routes", protect, getAllRoutes);
 router.post("/routes", protect, authorize("admin", "owner"), createRoute);
+router.put("/routes/:id", protect, authorize("admin", "owner"), updateRoute);
 router.get("/routes-stats", protect, getRouteStats);
 
 // =================== MAINTENANCE ROUTES ===================

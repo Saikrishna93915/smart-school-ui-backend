@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const settingSchema = new mongoose.Schema({
   schoolId: {
@@ -124,4 +124,4 @@ settingSchema.statics.findGrouped = async function(schoolId) {
   }, {});
 };
 
-module.exports = mongoose.model('Setting', settingSchema);
+export default mongoose.model('Setting', settingSchema);

@@ -7,6 +7,24 @@ import Student from "../models/Student.js";
 import mongoose from "mongoose";
 import { convertToWords } from "../utils/numberToWords.js";
 
+const normalizeReceiptNumber = (value = '') => {
+  let normalized = decodeURIComponent(String(value)).trim();
+
+  if (normalized.length % 2 === 0) {
+    const half = normalized.length / 2;
+    if (normalized.slice(0, half) === normalized.slice(half)) {
+      normalized = normalized.slice(0, half);
+    }
+  }
+
+  const standardMatch = normalized.match(/(REC-\d+-\d+|CREDIT-\d+-\d+|INST-\d+-\d+)/i);
+  if (standardMatch?.[1]) {
+    return standardMatch[1];
+  }
+
+  return normalized;
+};
+
 // @desc    Search students for payment
 // @route   GET /api/finance/students/search
 // @access  Private (Admin/Finance)
@@ -21,17 +39,58 @@ export const searchStudents = asyncHandler(async (req, res) => {
       });
     }
 
+    const escapedQuery = String(query).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const normalizedSpaceRegex = escapedQuery.replace(/\s+/g, "\\s+");
+
     const students = await Student.find({
-      $or: [
-        { "student.firstName": { $regex: query, $options: "i" } },
-        { "student.lastName": { $regex: query, $options: "i" } },
-        { admissionNumber: { $regex: query, $options: "i" } },
-        { "class.className": { $regex: query, $options: "i" } },
-        { "parents.father.name": { $regex: query, $options: "i" } },
-        { "parents.mother.name": { $regex: query, $options: "i" } },
-        { "parents.father.phone": { $regex: query, $options: "i" } },
-      ],
       status: "active",
+      $or: [
+        { "student.firstName": { $regex: escapedQuery, $options: "i" } },
+        { "student.lastName": { $regex: escapedQuery, $options: "i" } },
+        {
+          $expr: {
+            $regexMatch: {
+              input: {
+                $trim: {
+                  input: {
+                    $concat: [
+                      { $ifNull: ["$student.firstName", ""] },
+                      " ",
+                      { $ifNull: ["$student.lastName", ""] },
+                    ],
+                  },
+                },
+              },
+              regex: normalizedSpaceRegex,
+              options: "i",
+            },
+          },
+        },
+        {
+          $expr: {
+            $regexMatch: {
+              input: {
+                $trim: {
+                  input: {
+                    $concat: [
+                      { $ifNull: ["$student.lastName", ""] },
+                      " ",
+                      { $ifNull: ["$student.firstName", ""] },
+                    ],
+                  },
+                },
+              },
+              regex: normalizedSpaceRegex,
+              options: "i",
+            },
+          },
+        },
+        { admissionNumber: { $regex: escapedQuery, $options: "i" } },
+        { "class.className": { $regex: escapedQuery, $options: "i" } },
+        { "parents.father.name": { $regex: escapedQuery, $options: "i" } },
+        { "parents.mother.name": { $regex: escapedQuery, $options: "i" } },
+        { "parents.father.phone": { $regex: escapedQuery, $options: "i" } },
+      ],
     })
       .select("_id admissionNumber student class parents transport")
       .limit(20);
@@ -72,6 +131,12 @@ export const getStudentFeeDetails = asyncHandler(async (req, res) => {
     // 2. Get payments using direct MongoDB
     const db = mongoose.connection.db;
     const paymentsCollection = db.collection('payments');
+    const feeStructureCollection = db.collection('feestructures');
+
+    // Existing fee structure may already carry due/paid totals even when installments are absent.
+    let feeStructure = await feeStructureCollection.findOne({
+      admissionNumber: admissionNumber
+    });
     
     // Get all payments, sorted by type (fee installments first, then receipts)
     const rawPayments = await paymentsCollection.find({ 
@@ -92,11 +157,16 @@ export const getStudentFeeDetails = asyncHandler(async (req, res) => {
 
     console.log(`📊 Breakdown: ${feeInstallments.length} installments, ${paymentReceipts.length} receipts, ${creditNotes.length} credits`);
 
+    const toNumber = (value) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : 0;
+    };
+
     // Calculate from fee installments only
     feeInstallments.forEach((payment, index) => {
-      const amount = payment.totalAmount || 0;
-      const paid = payment.paidAmount || 0;
-      const due = payment.dueAmount || 0;
+      const amount = toNumber(payment.totalAmount || payment.amount);
+      const paid = toNumber(payment.paidAmount);
+      const due = toNumber(payment.dueAmount);
       
       console.log(`   Installment ${index + 1}: Total=₹${amount}, Paid=₹${paid}, Due=₹${due}, Status=${payment.status}`);
       
@@ -107,11 +177,15 @@ export const getStudentFeeDetails = asyncHandler(async (req, res) => {
 
     console.log(`📊 Totals: Fee=₹${totalFeeAmount}, Paid=₹${totalPaidAmount}, Due=₹${totalDueAmount}`);
 
+    // If installment records are absent but fee structure exists, use fee structure totals.
+    if (feeInstallments.length === 0 && feeStructure) {
+      totalFeeAmount = toNumber(feeStructure.totalFee);
+      totalPaidAmount = toNumber(feeStructure.totalPaid);
+      totalDueAmount = toNumber(feeStructure.totalDue);
+      console.log(`📌 Using FeeStructure totals (no installments): Fee=₹${totalFeeAmount}, Paid=₹${totalPaidAmount}, Due=₹${totalDueAmount}`);
+    }
+
     // 4. Get or create fee structure
-    const feeStructureCollection = db.collection('feestructures');
-    let feeStructure = await feeStructureCollection.findOne({ 
-      admissionNumber: admissionNumber 
-    });
 
     if (!feeStructure) {
       console.log(`📝 Creating new fee structure from data`);
@@ -148,17 +222,40 @@ export const getStudentFeeDetails = asyncHandler(async (req, res) => {
     }
 
     // 5. Format due payments for response
-    const duePayments = feeInstallments
-      .filter(p => p.dueAmount > 0)
+    let duePayments = feeInstallments
+      .filter(p => toNumber(p.dueAmount) > 0)
       .map(payment => ({
         _id: payment._id.toString(),
         componentName: payment.componentName || 'Annual Fee',
-        totalAmount: payment.totalAmount || 0,
-        paidAmount: payment.paidAmount || 0,
-        dueAmount: payment.dueAmount || 0,
+        totalAmount: toNumber(payment.totalAmount || payment.amount),
+        paidAmount: toNumber(payment.paidAmount),
+        dueAmount: toNumber(payment.dueAmount),
         dueDate: payment.dueDate || payment.createdAt,
         status: payment.status || 'pending'
       }));
+
+    // Fallback: use fee structure components when no installment records are present.
+    if (duePayments.length === 0 && feeInstallments.length === 0 && feeStructure?.feeComponents?.length) {
+      duePayments = feeStructure.feeComponents
+        .map((component, index) => {
+          const componentAmount = toNumber(component.amount);
+          const componentPaid = toNumber(component.paidAmount);
+          const componentDue = component.dueAmount !== undefined
+            ? toNumber(component.dueAmount)
+            : Math.max(0, componentAmount - componentPaid);
+
+          return {
+            _id: `FEECOMP-${index}`,
+            componentName: component.componentName || `Fee Component ${index + 1}`,
+            totalAmount: componentAmount,
+            paidAmount: componentPaid,
+            dueAmount: componentDue,
+            dueDate: component.dueDate || feeStructure.updatedAt || feeStructure.createdAt,
+            status: component.status || (componentDue > 0 ? 'pending' : 'completed')
+          };
+        })
+        .filter(component => component.dueAmount > 0);
+    }
 
     // 6. Format payment history (receipts only)
     const paymentHistory = paymentReceipts.map(payment => ({
@@ -304,6 +401,7 @@ export const recordPayment = asyncHandler(async (req, res) => {
     let remainingAmount = calculatedNetAmount;
     let appliedToPayments = [];
     let processedPaymentIds = [];
+    let usedFeeStructureFallback = false;
 
     // Apply payment to due payments (FIFO - First In First Out)
     for (const duePayment of duePayments) {
@@ -358,6 +456,49 @@ export const recordPayment = asyncHandler(async (req, res) => {
       processedPaymentIds.push(paymentId.toString());
       
       console.log(`✅ Applied ₹${amountToApply} to payment ${paymentId}. New due: ₹${newDueAmount}`);
+    }
+
+    // Fallback path: if no installment-level dues exist, apply payment directly on fee structure due.
+    if (appliedToPayments.length === 0 && remainingAmount > 0) {
+      const feeStructureCollection = db.collection('feestructures');
+      const feeStructure = await feeStructureCollection.findOne({ admissionNumber });
+
+      if (feeStructure && Number(feeStructure.totalDue || 0) > 0) {
+        const structureDue = Number(feeStructure.totalDue || 0);
+        const structurePaid = Number(feeStructure.totalPaid || 0);
+        const structureTotal = Number(feeStructure.totalFee || 0);
+
+        const amountToApply = Math.min(remainingAmount, structureDue);
+        const newDue = Math.max(0, structureDue - amountToApply);
+        const newPaid = structurePaid + amountToApply;
+
+        await feeStructureCollection.updateOne(
+          { _id: feeStructure._id },
+          {
+            $set: {
+              totalPaid: newPaid,
+              totalDue: newDue,
+              overallStatus: newDue === 0 ? 'paid' : 'pending',
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        appliedToPayments.push({
+          paymentId: `FEESTRUCTURE:${feeStructure._id.toString()}`,
+          componentName: 'Outstanding Fee Balance',
+          originalDue: structureDue,
+          amountApplied: amountToApply,
+          newDue,
+          status: newDue === 0 ? 'completed' : 'partial',
+        });
+
+        processedPaymentIds.push(`FEESTRUCTURE:${feeStructure._id.toString()}`);
+        remainingAmount -= amountToApply;
+        usedFeeStructureFallback = true;
+
+        console.log(`✅ Applied ₹${amountToApply} to FeeStructure due. New due: ₹${newDue}, totalFee: ₹${structureTotal}`);
+      }
     }
 
     // ==============================================
@@ -461,6 +602,12 @@ export const recordPayment = asyncHandler(async (req, res) => {
       // Metadata
       recordedBy: req.user._id,
       recordedByName: req.user.name || req.user.username || "System",
+      
+      // Cashier Information (who collected the payment)
+      collectedBy: req.user._id,
+      cashierName: req.user.name || "Unknown",
+      cashierId: req.user.employeeId || req.user._id.toString(),
+      
       status: 'completed',
       paymentType: 'receipt', // This is a receipt, not a fee installment
       createdAt: new Date(),
@@ -477,8 +624,10 @@ export const recordPayment = asyncHandler(async (req, res) => {
     
     const payment = { ...receiptData, _id: paymentId };
 
-    // Update fee structure with new totals
-    await updateFeeStructure(payment);
+    // Recalculate from installments only when installment records exist.
+    if (!usedFeeStructureFallback) {
+      await updateFeeStructure(payment);
+    }
 
     // Generate receipt document
     const receipt = await generateReceipt(payment);
@@ -634,7 +783,7 @@ export const createFeeInstallment = asyncHandler(async (req, res) => {
 // @access  Private (Admin/Finance)
 export const getPaymentByReceipt = asyncHandler(async (req, res) => {
   try {
-    const { receiptNumber } = req.params;
+    const receiptNumber = normalizeReceiptNumber(req.params.receiptNumber);
 
     const db = mongoose.connection.db;
     const paymentsCollection = db.collection('payments');
@@ -1023,6 +1172,19 @@ const updateFeeStructure = async (paymentData) => {
       admissionNumber: admissionNumber,
       paymentType: { $in: ['installment', undefined] }
     }).toArray();
+
+    const existingFeeStructure = await feeStructureCollection.findOne({
+      admissionNumber: admissionNumber,
+    });
+
+    // If no installment rows exist, preserve existing fee structure totals.
+    if (installmentPayments.length === 0 && existingFeeStructure) {
+      await feeStructureCollection.updateOne(
+        { _id: existingFeeStructure._id },
+        { $set: { updatedAt: new Date() } }
+      );
+      return existingFeeStructure;
+    }
     
     // Calculate totals from installments only
     let totalFee = 0;
@@ -1041,9 +1203,7 @@ const updateFeeStructure = async (paymentData) => {
     const cleanSection = classNameParts[1] || section || 'A';
     
     // Find or create fee structure
-    let feeStructure = await feeStructureCollection.findOne({
-      admissionNumber: admissionNumber,
-    });
+    let feeStructure = existingFeeStructure;
     
     const feeStructureData = {
       admissionNumber: admissionNumber,
@@ -1128,10 +1288,10 @@ const generateReceipt = async (payment) => {
       appliedPayments: payment.appliedToPayments || [],
       
       schoolDetails: {
-        name: "AI School ERP",
-        address: "123 Education Street, Smart City",
-        phone: "+91 98765 43210",
-        email: "accounts@aischoolerp.edu.in",
+        name: "PMC Tech School",
+        address: "Hosur - Krishnagiri Highways, Nallaganakothapalli, Near Koneripalli (PO), Hosur, Krishnagiri District, Tamil Nadu - 635 117",
+        phone: "+91 XXXXXXXXXX",
+        email: "office@pmctechschool.com",
       },
       
       createdAt: new Date(),

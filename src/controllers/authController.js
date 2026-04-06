@@ -2,6 +2,7 @@ import asyncHandler from "../utils/asyncHandler.js";
 import User from "../models/User.js";
 import Teacher from "../models/Teacher.js";
 import Student from "../models/Student.js";
+import Driver from "../models/Driver.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs"; // Import bcrypt for manual comparison
 
@@ -20,6 +21,20 @@ const generateToken = (user) => {
   );
 };
 
+const normalizePhoneDigits = (value = '') => String(value).replace(/\D/g, '');
+
+const phonesEquivalent = (storedPhone, inputPhone) => {
+  const storedDigits = normalizePhoneDigits(storedPhone);
+  const inputDigits = normalizePhoneDigits(inputPhone);
+
+  if (!storedDigits || !inputDigits) return false;
+  if (storedDigits === inputDigits) return true;
+
+  const storedLast10 = storedDigits.slice(-10);
+  const inputLast10 = inputDigits.slice(-10);
+  return storedLast10.length === 10 && inputLast10.length === 10 && storedLast10 === inputLast10;
+};
+
 /* =========================
    REGISTER
 ========================= */
@@ -34,7 +49,7 @@ export const register = asyncHandler(async (req, res) => {
   }
 
   // Validate role
-  if (!["admin", "owner", "teacher", "parent"].includes(role)) {
+  if (!["admin", "owner", "teacher", "parent", "cashier", "principal", "driver"].includes(role)) {
     return res.status(400).json({
       success: false,
       message: "Invalid role for registration"
@@ -90,15 +105,43 @@ export const login = asyncHandler(async (req, res) => {
     });
   }
 
-  // Find user by username/email and role
-  const user = await User.findOne({
+  const identifier = String(username).trim();
+  const normalizedEmail = identifier.toLowerCase();
+  const normalizedDigits = identifier.replace(/\D/g, '');
+  const phoneCandidates = normalizedDigits
+    ? Array.from(
+        new Set([
+          normalizedDigits,
+          `+${normalizedDigits}`,
+          normalizedDigits.length === 10 ? `+91${normalizedDigits}` : '',
+          normalizedDigits.length === 12 && normalizedDigits.startsWith('91')
+            ? `+${normalizedDigits}`
+            : '',
+        ].filter(Boolean))
+      )
+    : [];
+
+  // Find user by username/email/phone and role
+  let user = await User.findOne({
     role: role.toLowerCase(),
     active: true,
     $or: [
-      { username: username.trim().toLowerCase() },
-      { email: username.trim().toLowerCase() }
+      { username: normalizedEmail },
+      { email: normalizedEmail },
+      ...(phoneCandidates.length > 0 ? [{ phone: { $in: phoneCandidates } }] : [])
     ]
   });
+
+  // Fallback for formatted phone numbers (spaces, country code formats, etc.)
+  if (!user && normalizedDigits) {
+    const phoneUsers = await User.find({
+      role: role.toLowerCase(),
+      active: true,
+      phone: { $exists: true, $ne: '' }
+    }).limit(500);
+
+    user = phoneUsers.find((candidate) => phonesEquivalent(candidate.phone, normalizedDigits)) || null;
+  }
 
   if (!user) {
     return res.status(401).json({
@@ -117,12 +160,44 @@ export const login = asyncHandler(async (req, res) => {
       // Fallback: use bcrypt directly
       isMatch = await bcrypt.compare(password, user.password);
     }
+
+    // Backward-compatibility for parent default password variants
+    if (!isMatch && role.toLowerCase() === 'parent') {
+      const fallbackPasswords = ['Parent@123', 'Parents@123'];
+      for (const candidate of fallbackPasswords) {
+        if (candidate === password) continue;
+        const candidateMatch = typeof user.matchPassword === 'function'
+          ? await user.matchPassword(candidate)
+          : await bcrypt.compare(candidate, user.password);
+        if (candidateMatch) {
+          isMatch = true;
+          break;
+        }
+      }
+    }
   } catch (error) {
     console.error("Password check error:", error);
     return res.status(500).json({
       success: false,
       message: "Authentication error"
     });
+  }
+
+  if (!isMatch) {
+    // Legacy recovery path:
+    // Some older teacher records were created with pre-hashed passwords and then
+    // re-hashed by User pre-save middleware, which breaks default password login.
+    // If teacher enters default password while forcePasswordChange is still true,
+    // reset to a correctly hashed default and allow login.
+    if (
+      role.toLowerCase() === 'teacher' &&
+      password === 'Teacher@123' &&
+      user.forcePasswordChange
+    ) {
+      user.password = 'Teacher@123';
+      await user.save();
+      isMatch = true;
+    }
   }
 
   if (!isMatch) {
@@ -134,7 +209,26 @@ export const login = asyncHandler(async (req, res) => {
 
   // Fetch additional role-specific data
   let additionalData = {};
-  
+
+  if (role.toLowerCase() === 'cashier') {
+    additionalData.permissions = ["fee_collection", "receipts", "defaulters", "reports"];
+  }
+
+  if (role.toLowerCase() === 'principal') {
+    additionalData.permissions = ["view_all"];
+  }
+
+  if (role.toLowerCase() === 'driver') {
+    const driverProfile = await Driver.findOne({
+      $or: [{ user: user._id }, { userId: user._id }]
+    }).lean();
+    if (driverProfile) {
+      additionalData.driverId = driverProfile._id;
+      additionalData.assignedVehicle = driverProfile.assignedVehicle;
+      user.linkedId = driverProfile._id;
+    }
+  }
+
   if (role.toLowerCase() === 'teacher') {
     const teacherProfile = await Teacher.findOne({ 
       $or: [
@@ -188,6 +282,21 @@ export const changePassword = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       message: "Old password and new password are required"
+    });
+  }
+
+  // Validation
+  if (newPassword.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: "New password must be at least 6 characters"
+    });
+  }
+
+  if (oldPassword === newPassword) {
+    return res.status(400).json({
+      success: false,
+      message: "New password must be different from old password"
     });
   }
 
@@ -281,5 +390,66 @@ export const forgotPassword = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     message: "Password reset instructions sent to your email"
+  });
+});
+
+/* =========================
+   LOGOUT
+========================= */
+export const logout = asyncHandler(async (req, res) => {
+  // Logout is typically handled on the frontend by clearing the JWT token
+  // Backend just confirms the logout
+  res.status(200).json({
+    success: true,
+    message: "Logged out successfully"
+  });
+});
+
+/* =========================
+   UPDATE PROFILE
+========================= */
+export const updateProfile = asyncHandler(async (req, res) => {
+  const { name, email, phone } = req.body;
+
+  const user = await User.findById(req.user.id);
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found"
+    });
+  }
+
+  // Check if email is being changed and if it already exists
+  if (email && email !== user.email) {
+    const existingUser = await User.findOne({
+      email: email.toLowerCase(),
+      _id: { $ne: user._id }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already in use"
+      });
+    }
+  }
+
+  // Update fields
+  if (name) user.name = name.trim();
+  if (email) user.email = email.toLowerCase();
+  if (phone) user.phone = phone;
+
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: "Profile updated successfully",
+    data: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role
+    }
   });
 });

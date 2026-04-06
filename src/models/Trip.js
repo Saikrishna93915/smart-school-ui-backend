@@ -115,29 +115,32 @@ const tripSchema = new mongoose.Schema(
   }
 );
 
-// Calculate attendance percentage before saving
-tripSchema.pre('save', function (next) {
-  if (this.totalStudents > 0) {
-    this.attendance = (this.presentStudents / this.totalStudents) * 100;
-  }
-
-  // Calculate distance covered if end odometer is set
-  if (this.endOdometer && this.startOdometer) {
-    this.distanceCovered = this.endOdometer - this.startOdometer;
-  }
-  next();
-});
-
-// Generate trip ID before saving
+// Calculate attendance and generate trip ID before saving
 tripSchema.pre('save', async function (next) {
-  if (!this.tripId) {
-    const count = await this.constructor.countDocuments();
-    const date = new Date();
-    const year = date.getFullYear().toString().slice(-2);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    this.tripId = `TRP${year}${month}${(count + 1).toString().padStart(4, '0')}`;
+  try {
+    // Calculate attendance percentage
+    if (this.totalStudents > 0) {
+      this.attendance = (this.presentStudents / this.totalStudents) * 100;
+    }
+
+    // Calculate distance covered if end odometer is set
+    if (this.endOdometer && this.startOdometer) {
+      this.distanceCovered = this.endOdometer - this.startOdometer;
+    }
+
+    // Generate trip ID if not provided
+    if (!this.tripId) {
+      const count = await this.constructor.countDocuments();
+      const date = new Date();
+      const year = date.getFullYear().toString().slice(-2);
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      this.tripId = `TRP${year}${month}${(count + 1).toString().padStart(4, '0')}`;
+    }
+
+    next();
+  } catch (error) {
+    next(error);
   }
-  next();
 });
 
 // Query middleware to exclude deleted documents
