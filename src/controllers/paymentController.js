@@ -20,6 +20,7 @@ import {
 /**
  * Validate payment method-specific required fields and formats
  * UTR/Transaction Reference is MANDATORY for ALL payment methods EXCEPT cash
+ * Transaction ID is MANDATORY for UPI, Card, and Online payments
  */
 function validatePaymentMethodDetails(method, body) {
   const errors = [];
@@ -39,6 +40,13 @@ function validatePaymentMethodDetails(method, body) {
   // Payment method-specific validations
   switch (method) {
     case 'upi':
+      // UPI requires BOTH UTR (from bank) + Transaction ID (from app)
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID (App Reference) is required for UPI payments');
+      } else if (!/^[A-Za-z0-9]{12,35}$/.test(body.transactionId.trim())) {
+        errors.push('Transaction ID must be 12-35 alphanumeric characters');
+      }
+
       if (!body.upiId || body.upiId.trim() === '') {
         errors.push('UPI ID is required for UPI payments');
       } else if (!/^[\w.-]+@[\w]+$/.test(body.upiId)) {
@@ -98,6 +106,13 @@ function validatePaymentMethodDetails(method, body) {
       break;
 
     case 'card':
+      // Card requires BOTH UTR (from bank) + Transaction ID (from gateway)
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID (Gateway Reference) is required for card payments');
+      } else if (!/^[A-Za-z0-9]{12,35}$/.test(body.transactionId.trim())) {
+        errors.push('Transaction ID must be 12-35 alphanumeric characters');
+      }
+
       if (!body.cardLast4 || body.cardLast4.trim() === '') {
         errors.push('Last 4 digits of card are required for card payments');
       } else if (!/^\d{4}$/.test(body.cardLast4.trim())) {
@@ -106,7 +121,16 @@ function validatePaymentMethodDetails(method, body) {
       break;
 
     case 'online':
-      // Online payments only require UTR (already validated above)
+      // Online requires BOTH UTR (from bank) + Transaction ID (from gateway)
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID (Gateway Reference) is required for online payments');
+      } else if (!/^[A-Za-z0-9]{12,35}$/.test(body.transactionId.trim())) {
+        errors.push('Transaction ID must be 12-35 alphanumeric characters');
+      }
+
+      if (!body.referenceNo || body.referenceNo.trim() === '') {
+        errors.push('Payment Gateway/Platform name is required for online payments');
+      }
       break;
 
     default:
