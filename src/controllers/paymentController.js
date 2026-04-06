@@ -308,10 +308,8 @@ export const recordPayment = asyncHandler(async (req, res) => {
     paymentData.cashierId = cashier?.employeeId;
     paymentData.status = 'completed';
 
-    const openShift = cashier ? await getOpenShiftForCashier(cashier._id, session) : null;
-    if (openShift) {
-      paymentData.shiftId = openShift._id;
-    }
+    // openShift is already declared above, just use it
+    paymentData.shiftId = openShift._id;
 
     const payment = await Payment.create([paymentData], { session });
     const createdPayment = payment[0];
