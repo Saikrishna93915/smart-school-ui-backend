@@ -211,7 +211,7 @@ export const recordPayment = asyncHandler(async (req, res) => {
     }
 
     // Get student details
-    const student = await Student.findOne({ 
+    const student = await Student.findOne({
       $or: [
         { 'academic.admissionNumber': admissionNumber },
         { admissionNumber }
@@ -224,6 +224,26 @@ export const recordPayment = asyncHandler(async (req, res) => {
         success: false,
         message: 'Student not found'
       });
+    }
+
+    // CRITICAL: Prevent overpayment - check if payment exceeds remaining due
+    const feeStructure = await FeeStructure.findOne({
+      admissionNumber: student.academic?.admissionNumber || admissionNumber
+    }).session(session);
+
+    if (feeStructure) {
+      const totalFee = feeStructure.totalAmount || feeStructure.totalFee || 0;
+      const alreadyPaid = feeStructure.totalPaid || 0;
+      const remainingDue = totalFee - alreadyPaid;
+
+      // Allow small overpayment (₹1 tolerance for rounding)
+      if (paymentAmount > remainingDue + 1) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: `Payment amount (₹${paymentAmount}) exceeds remaining due amount (₹${remainingDue}). Total fee: ₹${totalFee}, Already paid: ₹${alreadyPaid}`
+        });
+      }
     }
 
     // Get cashier details (who is recording the payment)
