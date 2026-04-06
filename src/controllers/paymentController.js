@@ -15,6 +15,133 @@ import {
   getOpenShiftForCashier,
 } from '../services/cashierAccountingService.js';
 
+// ==================== PAYMENT VALIDATION HELPERS ====================
+
+/**
+ * Validate payment method-specific required fields and formats
+ */
+function validatePaymentMethodDetails(method, body) {
+  const errors = [];
+
+  switch (method) {
+    case 'upi':
+      if (!body.upiId || body.upiId.trim() === '') {
+        errors.push('UPI ID is required for UPI payments');
+      } else if (!/^[\w.-]+@[\w]+$/.test(body.upiId)) {
+        errors.push('Invalid UPI ID format. Example: username@paytm or 9876543210@paytm');
+      }
+
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID is required for UPI payments');
+      } else if (!/^[A-Za-z0-9]{12,20}$/.test(body.transactionId.trim())) {
+        errors.push('Transaction ID must be 12-20 alphanumeric characters');
+      }
+      break;
+
+    case 'bank-transfer':
+      if (!body.utrNo || body.utrNo.trim() === '') {
+        errors.push('UTR number is required for bank transfer payments');
+      } else if (!/^\d{12}$/.test(body.utrNo.trim())) {
+        errors.push('UTR number must be exactly 12 digits (NEFT/RTGS/IMPS)');
+      }
+
+      if (!body.bankName || body.bankName.trim() === '') {
+        errors.push('Bank name is required for bank transfer payments');
+      } else if (!/^[a-zA-Z\s]{2,50}$/.test(body.bankName.trim())) {
+        errors.push('Bank name must be 2-50 alphabetic characters');
+      }
+
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID is required for bank transfer payments');
+      }
+
+      if (!body.ifscCode || body.ifscCode.trim() === '') {
+        errors.push('IFSC code is required for bank transfer payments');
+      } else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(body.ifscCode.trim().toUpperCase())) {
+        errors.push('Invalid IFSC code format. Example: SBIN0001234 (4 letters + 0 + 6 alphanumeric)');
+      }
+
+      if (body.accountNumber && body.accountNumber.trim() !== '') {
+        if (!/^\d{9,18}$/.test(body.accountNumber.trim())) {
+          errors.push('Account number must be 9-18 digits');
+        }
+      }
+      break;
+
+    case 'cheque':
+      if (!body.chequeNo || body.chequeNo.trim() === '') {
+        errors.push('Cheque number is required for cheque payments');
+      } else if (!/^\d{6,9}$/.test(body.chequeNo.trim())) {
+        errors.push('Cheque number must be 6-9 digits');
+      }
+
+      if (!body.bankName || body.bankName.trim() === '') {
+        errors.push('Bank name is required for cheque payments');
+      } else if (!/^[a-zA-Z\s]{2,50}$/.test(body.bankName.trim())) {
+        errors.push('Bank name must be 2-50 alphabetic characters');
+      }
+
+      if (!body.chequeDate) {
+        errors.push('Cheque date is required for cheque payments');
+      } else {
+        const chequeDate = new Date(body.chequeDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (chequeDate > today) {
+          errors.push('Cheque date cannot be in the future');
+        }
+      }
+
+      if (body.ifscCode && body.ifscCode.trim() !== '') {
+        if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(body.ifscCode.trim().toUpperCase())) {
+          errors.push('Invalid IFSC code format. Example: SBIN0001234');
+        }
+      }
+      break;
+
+    case 'card':
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID is required for card payments');
+      } else if (!/^[A-Za-z0-9]{6,30}$/.test(body.transactionId.trim())) {
+        errors.push('Transaction ID must be 6-30 alphanumeric characters');
+      }
+
+      if (!body.cardLast4 || body.cardLast4.trim() === '') {
+        errors.push('Last 4 digits of card are required for card payments');
+      } else if (!/^\d{4}$/.test(body.cardLast4.trim())) {
+        errors.push('Card last 4 digits must be exactly 4 digits');
+      }
+
+      if (!body.referenceNo || body.referenceNo.trim() === '') {
+        errors.push('Reference number is required for card payments');
+      }
+      break;
+
+    case 'online':
+      if (!body.transactionId || body.transactionId.trim() === '') {
+        errors.push('Transaction ID is required for online payments');
+      } else if (!/^[A-Za-z0-9]{6,30}$/.test(body.transactionId.trim())) {
+        errors.push('Transaction ID must be 6-30 alphanumeric characters');
+      }
+
+      if (!body.referenceNo || body.referenceNo.trim() === '') {
+        errors.push('Reference number is required for online payments');
+      } else if (!/^[A-Za-z0-9]{6,20}$/.test(body.referenceNo.trim())) {
+        errors.push('Reference number must be 6-20 alphanumeric characters');
+      }
+      break;
+
+    case 'cash':
+      // Cash only requires amount, no additional validation needed
+      break;
+
+    default:
+      errors.push(`Invalid payment method: ${method}`);
+  }
+
+  return errors.length > 0 ? errors.join('. ') : null;
+}
+
 // @desc    Record a new payment
 // @route   POST /api/finance/payments/record
 // @access  Private (Cashier/Admin)
@@ -48,6 +175,38 @@ export const recordPayment = asyncHandler(async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Admission number, amount, and payment method are required'
+      });
+    }
+
+    // Validate amount is greater than 0
+    const paymentAmount = parseFloat(amount);
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount must be greater than 0'
+      });
+    }
+
+    // Validate amount doesn't exceed maximum (₹999,999)
+    if (paymentAmount > 999999) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: 'Payment amount cannot exceed ₹999,999'
+      });
+    }
+
+    // Normalize payment method to lowercase
+    const normalizedMethod = paymentMethod.toLowerCase().replace('_', '-');
+
+    // Validate payment-method-specific required fields
+    const validationErrors = validatePaymentMethodDetails(normalizedMethod, req.body);
+    if (validationErrors) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: validationErrors
       });
     }
 
@@ -90,18 +249,23 @@ export const recordPayment = asyncHandler(async (req, res) => {
 
       // Use IST time (UTC+5:30) for Indian timezone
       paymentDate: paymentDate ? new Date(paymentDate) : new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })),
-      paymentMethod,
-      amount: parseFloat(amount),
+      paymentMethod: normalizedMethod, // Use normalized method name
+      amount: paymentAmount,
       discount: parseFloat(discount) || 0,
       lateFee: parseFloat(lateFee) || 0,
-      netAmount: parseFloat(netAmount) || parseFloat(amount),
-      
+      netAmount: parseFloat(netAmount) || paymentAmount,
+
       referenceNo,
       transactionId,
       bankName,
       chequeNo,
+      chequeDate: req.body.chequeDate,
       upiId,
-      
+      utrNo: req.body.utrNo,
+      ifscCode: req.body.ifscCode,
+      accountNumber: req.body.accountNumber,
+      cardLast4: req.body.cardLast4,
+
       feesPaid: feesPaid || [],
       recordedBy: req.user._id,
       cashierName: cashier ? `${cashier.firstName} ${cashier.lastName}` : req.user.name,

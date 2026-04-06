@@ -105,6 +105,9 @@ const paymentSchema = new mongoose.Schema(
     chequeDate: Date,
     utrNo: String,
     upiId: String,
+    ifscCode: String,
+    accountNumber: String,
+    cardLast4: String,
     
     // Amount Details
     amount: Number,
@@ -177,6 +180,9 @@ paymentSchema.index({ admissionNumber: 1 });
 paymentSchema.index({ academicYear: 1 });
 paymentSchema.index({ status: 1 });
 paymentSchema.index({ paymentDate: -1 });
+paymentSchema.index({ paymentMethod: 1 });
+paymentSchema.index({ transactionId: 1 });
+paymentSchema.index({ utrNo: 1 });
 
 // Pre-save middleware to calculate dueAmount if not set
 paymentSchema.pre("save", function (next) {
