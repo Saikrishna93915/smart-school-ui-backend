@@ -57,9 +57,9 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
     ]),
     Payment.find({ status: { $in: ["paid", "completed"] }, ...cashierFilter })
       .populate("studentId", "student class admissionNumber parents")
-      .sort({ paymentDate: -1 })
+      .sort({ createdAt: -1 }) // CRITICAL FIX: Sort by createdAt (actual record time) not paymentDate
       .limit(10)
-      .select("receiptNumber amount paymentMethod paymentDate studentId"),
+      .select("receiptNumber amount paymentMethod paymentDate createdAt studentId"),
     Payment.aggregate([
       { $match: {
           paymentDate: { $gte: new Date(startOfDay.getTime() - 7 * 24 * 60 * 60 * 1000) },
@@ -317,8 +317,8 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
     amount: tx.amount,
     paymentMethod: tx.paymentMethod,
     status: tx.status,
-    paymentDate: tx.paymentDate,
-    createdAt: tx.paymentDate || tx.createdAt || new Date(),
+    paymentDate: tx.paymentDate, // User-entered payment date (can be backdated)
+    createdAt: tx.createdAt || tx.paymentDate || new Date(), // CRITICAL: Actual record time for display
     studentId: tx.studentId ? {
       personal: {
         firstName: tx.studentId.student?.firstName || "",
