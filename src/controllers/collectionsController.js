@@ -25,52 +25,56 @@ export const getCollections = asyncHandler(async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    // Build match stage
+    // Build match stage - CRITICAL FIX: Use $and for ALL filters to prevent conflicts
     const matchStage = {};
-
-    // Only get receipt type payments (include installment - the standard payment type)
-    // IMPORTANT: Include null/undefined to capture documents without paymentType field
-    matchStage.paymentType = { $in: ['receipt', 'payment', 'installment', null, undefined] };
+    
+    // Base status filter (exclude cancelled)
     matchStage.status = { $ne: 'cancelled' };
 
-    // Search filter
+    // Search filter - CRITICAL FIX: Wrap in $and to avoid overwriting className/status filters
     if (search && search.trim()) {
-      matchStage.$or = [
-        { studentName: { $regex: search, $options: 'i' } },
-        { admissionNumber: { $regex: search, $options: 'i' } },
-        { receiptNumber: { $regex: search, $options: 'i' } },
-        { 'studentDetails.student.firstName': { $regex: search, $options: 'i' } },
-        { 'studentDetails.student.lastName': { $regex: search, $options: 'i' } },
-        { parentName: { $regex: search, $options: 'i' } },
-        { parentPhone: { $regex: search, $options: 'i' } }
-      ];
+      const searchRegex = new RegExp(search.trim(), 'i');
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({
+        $or: [
+          { studentName: searchRegex },
+          { admissionNumber: searchRegex },
+          { receiptNumber: searchRegex },
+          { 'studentDetails.student.firstName': searchRegex },
+          { 'studentDetails.student.lastName': searchRegex },
+          { parentName: searchRegex },
+          { parentPhone: searchRegex }
+        ]
+      });
     }
 
-    // Class filter
+    // Class filter - EXACT match only (case-insensitive)
     if (className && className !== 'All Classes') {
-      matchStage.className = className;
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({ className: { $regex: new RegExp(`^${className}$`, 'i') } });
     }
 
-    // Status filter
+    // Status filter - EXACT match only
     if (status && status !== 'All Status') {
+      let statusFilter;
       if (status === 'completed') {
-        matchStage.status = 'completed';
+        statusFilter = 'completed';
       } else if (status === 'pending') {
-        matchStage.$or = [
-          { status: 'pending' },
-          { status: 'partial' }
-        ];
+        statusFilter = { $in: ['pending', 'partial'] };
       } else if (status === 'failed') {
-        matchStage.$or = [
-          { status: 'failed' },
-          { status: 'cancelled' }
-        ];
+        statusFilter = { $in: ['failed', 'cancelled'] };
+      } else {
+        statusFilter = status;
       }
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({ status: statusFilter });
     }
 
-    // Payment method filter
+    // Payment method filter - normalize and exact match
     if (paymentMethod && paymentMethod !== 'All Methods') {
-      matchStage.paymentMethod = paymentMethod;
+      const normalizedMethod = paymentMethod.toLowerCase().replace('_', '-');
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({ paymentMethod: { $regex: new RegExp(`^${normalizedMethod}$`, 'i') } });
     }
 
     // Date range filter
