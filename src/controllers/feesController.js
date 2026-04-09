@@ -3,7 +3,9 @@ import Payment from "../models/Payment.js";
 import FeeStructure from "../models/FeeStructure.js";
 import Receipt from "../models/Receipt.js";
 import Student from "../models/Student.js";
-import { convertToWords } from "../utils/numberToWords.js";mo
+import FeeAudit from "../models/FeeAudit.js";
+import { convertToWords } from "../utils/numberToWords.js";
+
 // @desc    Get all fee structures
 // @route   GET /api/finance/fees/structures
 // @access  Private (Admin/Finance)
@@ -381,6 +383,692 @@ export const getFeeSummary = asyncHandler(async (req, res) => {
       },
       classWiseCollection,
     });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// @desc    Create fee structure for a student
+// @route   POST /api/fees/structure
+// @access  Private (Admin)
+export const createFeeStructure = asyncHandler(async (req, res) => {
+  try {
+    const {
+      admissionNumber,
+      studentId,
+      studentName,
+      className,
+      section,
+      academicYear,
+      feeComponents,
+      transportOpted,
+      transportFee,
+      totalFee,
+      dueDate
+    } = req.body;
+
+    // Validate required fields
+    if (!admissionNumber || !studentId || !className || !section) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: admissionNumber, studentId, className, section"
+      });
+    }
+
+    // Check if fee structure already exists for this student
+    const existingFee = await FeeStructure.findOne({
+      admissionNumber,
+      academicYear: academicYear || "2025-2026"
+    });
+
+    if (existingFee) {
+      return res.status(400).json({
+        success: false,
+        message: "Fee structure already exists for this student in this academic year"
+      });
+    }
+
+    // Create fee structure
+    const hasTransportComponent = Array.isArray(feeComponents)
+      ? feeComponents.some(component => component.componentName === "Transport Fee")
+      : false;
+
+    const transportComponentAmount = Array.isArray(feeComponents)
+      ? feeComponents.find(component => component.componentName === "Transport Fee")?.amount
+      : undefined;
+
+    const feeStructure = await FeeStructure.create({
+      admissionNumber,
+      studentId,
+      studentName: studentName || "",
+      className,
+      section,
+      academicYear: academicYear || "2025-2026",
+      feeComponents: feeComponents || [],
+      transportOpted: hasTransportComponent || transportOpted || false,
+      transportFee: transportComponentAmount ?? (transportFee || 0),
+      totalFee: totalFee || 0,
+      totalPaid: 0,
+      totalDue: totalFee || 0,
+      discountApplied: 0,
+      status: 'pending',
+      dueDate: dueDate || new Date(new Date().getFullYear(), 5, 30)
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Fee structure created successfully",
+      data: feeStructure
+    });
+  } catch (error) {
+    console.error("Fee structure creation error:", error);
+    
+    // Handle duplicate key error (compound index violation)
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: `Fee structure already exists for student with admission number '${req.body.admissionNumber}' in academic year '${req.body.academicYear || "2025-2026"}'`
+      });
+    }
+    
+    // Handle validation errors
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map(e => e.message)
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error creating fee structure"
+    });
+  }
+});
+
+// @desc    Get fee structure by student ID
+// @route   GET /api/fees/structure/:studentId
+// @access  Private
+export const getFeeStructureByStudent = asyncHandler(async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    const feeStructure = await FeeStructure.findOne({ studentId });
+
+    if (!feeStructure) {
+      return res.status(404).json({
+        success: false,
+        message: "Fee structure not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: feeStructure
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// @desc    Update student fee structure with audit trail
+// @route   PUT /api/finance/fees/update-student-fees/:admissionNumber
+// @access  Private (Admin/Finance)
+export const updateStudentFees = asyncHandler(async (req, res) => {
+  try {
+    const { admissionNumber } = req.params;
+    const { 
+      feeComponents, 
+      reason, 
+      notes, 
+      actionType = "update" 
+    } = req.body;
+
+    console.log(`📝 Updating fees for ${admissionNumber}`);
+
+    // 1. Find the student
+    const student = await Student.findOne({ admissionNumber });
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found"
+      });
+    }
+
+    // 2. Find existing fee structure
+    let feeStructure = await FeeStructure.findOne({ admissionNumber });
+    
+    // Store previous fee structure for audit
+    const previousFeeStructure = feeStructure ? {
+      totalFee: feeStructure.totalFee,
+      baseFee: feeStructure.feeComponents.find(c => c.componentName === 'Base Fee')?.amount || 0,
+      activityFee: feeStructure.feeComponents.find(c => c.componentName === 'Activity Fee')?.amount || 0,
+      examFee: feeStructure.feeComponents.find(c => c.componentName === 'Exam Fee')?.amount || 0,
+      transportFee: feeStructure.feeComponents.find(c => c.componentName === 'Transport Fee')?.amount || 0,
+      otherFees: feeStructure.feeComponents.find(c => c.componentName === 'Other Fees')?.amount || 0,
+      feeComponents: feeStructure.feeComponents.map(c => ({
+        componentName: c.componentName,
+        amount: c.amount
+      }))
+    } : null;
+
+    // 3. Calculate new totals
+    const newTotalFee = feeComponents.reduce((sum, component) => sum + (component.amount || 0), 0);
+    
+    // Prepare new fee components with proper structure
+    const formattedFeeComponents = feeComponents.map(component => ({
+      componentName: component.componentName,
+      amount: component.amount,
+      dueDate: component.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+      isMandatory: component.isMandatory !== false,
+      isRecurring: component.isRecurring || false,
+      frequency: component.frequency || "one-time",
+      status: component.status || "pending",
+      paidAmount: component.paidAmount || 0
+    }));
+
+    // 4. Update or create fee structure
+    if (feeStructure) {
+      // Update existing fee structure
+      feeStructure.feeComponents = formattedFeeComponents;
+      feeStructure.totalFee = newTotalFee;
+      feeStructure.totalDue = newTotalFee - feeStructure.totalPaid;
+      
+      // Update transport info if transport component exists
+      const transportComponent = feeComponents.find(c => c.componentName === 'Transport Fee');
+      if (transportComponent) {
+        feeStructure.transportOpted = true;
+        feeStructure.transportFee = transportComponent.amount;
+      }
+      
+      await feeStructure.save();
+      console.log(`✅ Fee structure updated for ${admissionNumber}`);
+    } else {
+      // Create new fee structure
+      const className = student.class?.className || '';
+      const section = student.class?.section || '';
+      const academicYear = student.class?.academicYear || new Date().getFullYear() + '-' + (new Date().getFullYear() + 1);
+      
+      feeStructure = new FeeStructure({
+        admissionNumber,
+        studentId: student._id,
+        studentName: `${student.student.firstName} ${student.student.lastName}`,
+        className,
+        section,
+        academicYear,
+        feeComponents: formattedFeeComponents,
+        totalFee: newTotalFee,
+        totalPaid: 0,
+        totalDue: newTotalFee,
+        transportOpted: feeComponents.some(c => c.componentName === 'Transport Fee'),
+        transportFee: feeComponents.find(c => c.componentName === 'Transport Fee')?.amount || 0,
+        overallStatus: 'active'
+      });
+      
+      await feeStructure.save();
+      console.log(`✅ New fee structure created for ${admissionNumber}`);
+    }
+
+    // 5. Create new fee structure snapshot for audit
+    const newFeeStructure = {
+      totalFee: feeStructure.totalFee,
+      baseFee: feeComponents.find(c => c.componentName === 'Base Fee')?.amount || 0,
+      activityFee: feeComponents.find(c => c.componentName === 'Activity Fee')?.amount || 0,
+      examFee: feeComponents.find(c => c.componentName === 'Exam Fee')?.amount || 0,
+      transportFee: feeComponents.find(c => c.componentName === 'Transport Fee')?.amount || 0,
+      otherFees: feeComponents.find(c => c.componentName === 'Other Fees')?.amount || 0,
+      feeComponents: feeComponents.map(c => ({
+        componentName: c.componentName,
+        amount: c.amount
+      }))
+    };
+
+    // 6. Calculate changes summary
+    const totalFeeChange = previousFeeStructure ? 
+      newFeeStructure.totalFee - previousFeeStructure.totalFee : 
+      newFeeStructure.totalFee;
+    
+    const componentsChanged = [];
+    if (previousFeeStructure) {
+      feeComponents.forEach(newComp => {
+        const oldComp = previousFeeStructure.feeComponents.find(c => c.componentName === newComp.componentName);
+        if (!oldComp || oldComp.amount !== newComp.amount) {
+          componentsChanged.push(newComp.componentName);
+        }
+      });
+    } else {
+      componentsChanged.push(...feeComponents.map(c => c.componentName));
+    }
+
+    const changesSummary = {
+      totalFeeChange,
+      componentsChanged,
+      reason: reason || 'Standard fee update',
+      adjustmentType: totalFeeChange > 0 ? 'increase' : totalFeeChange < 0 ? 'decrease' : 'no_change'
+    };
+
+    // 7. Log audit trail
+    const auditData = {
+      admissionNumber,
+      studentId: student._id,
+      studentName: `${student.student.firstName} ${student.student.lastName}`,
+      className: student.class?.className || '',
+      section: student.class?.section || '',
+      academicYear: student.class?.academicYear || new Date().getFullYear() + '-' + (new Date().getFullYear() + 1),
+      actionType,
+      previousFeeStructure: previousFeeStructure || undefined,
+      newFeeStructure,
+      changesSummary,
+      reason: reason || 'Fee structure updated',
+      notes: notes || '',
+      performedBy: req.user._id,
+      performedByName: req.user.name || req.user.username,
+      performedByRole: req.user.role || 'admin',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      affectedFeeStructureId: feeStructure._id,
+      approvalStatus: 'approved' // Auto-approve for now
+    };
+
+    await FeeAudit.logFeeChange(auditData);
+
+    // 8. Return success response
+    res.status(200).json({
+      success: true,
+      message: `Fee structure ${previousFeeStructure ? 'updated' : 'created'} successfully`,
+      data: {
+        feeStructure: {
+          _id: feeStructure._id,
+          admissionNumber: feeStructure.admissionNumber,
+          studentName: feeStructure.studentName,
+          className: feeStructure.className,
+          section: feeStructure.section,
+          totalFee: feeStructure.totalFee,
+          totalPaid: feeStructure.totalPaid,
+          totalDue: feeStructure.totalDue,
+          feeComponents: feeStructure.feeComponents
+        },
+        changes: changesSummary,
+        auditLogged: true
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Error updating student fees:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// @desc    Get fee change audit history for a student
+// @route   GET /api/finance/fees/audit-history/:admissionNumber
+// @access  Private (Admin/Finance)
+export const getFeeAuditHistory = asyncHandler(async (req, res) => {
+  try {
+    const { admissionNumber } = req.params;
+    const { limit = 50, skip = 0, actionType } = req.query;
+
+    console.log(`📜 Fetching fee audit history for ${admissionNumber}`);
+
+    // Get audit history
+    const auditHistory = await FeeAudit.getStudentAuditHistory(admissionNumber, {
+      limit: parseInt(limit),
+      skip: parseInt(skip),
+      actionType
+    });
+
+    // Get total count
+    const query = { admissionNumber };
+    if (actionType) query.actionType = actionType;
+    const totalCount = await FeeAudit.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        auditHistory: auditHistory.map(audit => ({
+          id: audit._id,
+          date: audit.createdAt,
+          actionType: audit.actionType,
+          previousTotal: audit.previousFeeStructure?.totalFee || 0,
+          newTotal: audit.newFeeStructure?.totalFee || 0,
+          change: audit.changesSummary?.totalFeeChange || 0,
+          componentsChanged: audit.changesSummary?.componentsChanged || [],
+          reason: audit.reason,
+          notes: audit.notes,
+          performedBy: {
+            name: audit.performedByName,
+            role: audit.performedByRole,
+            user: audit.performedBy
+          },
+          approvalStatus: audit.approvalStatus,
+          timestamp: audit.createdAt
+        })),
+        pagination: {
+          total: totalCount,
+          limit: parseInt(limit),
+          skip: parseInt(skip),
+          hasMore: (parseInt(skip) + auditHistory.length) < totalCount
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching audit history:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// @desc    Get fee structure for current student
+// @route   GET /api/fees/my-fee-structure
+// @access  Private (Student)
+export const getMyFeeStructure = asyncHandler(async (req, res) => {
+  try {
+    // Get current user ID from auth middleware
+    const userId = req.user._id;
+
+    // Find student with this userId
+    const student = await Student.findOne({ userId });
+    
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found"
+      });
+    }
+
+    // Find fee structure using studentId
+    const feeStructure = await FeeStructure.findOne({ 
+      studentId: student._id 
+    });
+
+    if (!feeStructure) {
+      return res.status(404).json({
+        success: false,
+        message: "Fee structure not found for this student"
+      });
+    }
+
+    // Calculate payment summary
+    const totalFee = feeStructure.totalFee || 0;
+    const totalPaid = feeStructure.totalPaid || 0;
+    const totalDue = Math.max(0, totalFee - totalPaid - (feeStructure.discountApplied || 0));
+    const paidPercentage = totalFee > 0 ? (totalPaid / totalFee) * 100 : 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...feeStructure.toObject(),
+        summary: {
+          totalFee,
+          totalPaid,
+          totalDue,
+          paidPercentage,
+          discount: feeStructure.discountApplied || 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error fetching student fee structure:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch fee structure"
+    });
+  }
+});
+
+// ===========================
+// PRODUCTION-LEVEL CONTROLLERS
+// ===========================
+
+// @desc    Process student payment
+// @route   POST /api/fees/pay
+// @access  Private (Student)
+export const processStudentPayment = asyncHandler(async (req, res) => {
+  try {
+    const { studentId, amount, paymentMethod, transactionId, description } = req.body;
+
+    // Validate input
+    if (!studentId || !amount || !paymentMethod) {
+      return res.status(400).json({
+        success: false,
+        message: "Student ID, amount, and payment method are required",
+      });
+    }
+
+    // Get student
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found",
+      });
+    }
+
+    // Check student dues
+    const studentDues = await FeeStructure.findOne({ studentId });
+    if (!studentDues || studentDues.totalDue <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No pending dues for this student",
+      });
+    }
+
+    if (amount > studentDues.totalDue) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount exceeds due amount of ₹${studentDues.totalDue}`,
+      });
+    }
+
+    // Generate receipt number
+    const lastPayment = await Payment.findOne().sort("-receiptNumber");
+    const nextReceiptNo = lastPayment
+      ? "REC" + (parseInt(lastPayment.receiptNumber.substring(3)) + 1)
+      : `REC${new Date().getFullYear()}000001`;
+
+    // Create payment
+    const payment = await Payment.create({
+      studentId,
+      admissionNumber: student.admissionNumber,
+      studentName: `${student.student?.firstName} ${student.student?.lastName}`,
+      className: student.class?.className,
+      section: student.class?.section,
+      amount,
+      paymentMethod,
+      transactionId,
+      receiptNumber: nextReceiptNo,
+      status: "completed",
+      paymentDate: new Date(),
+      description,
+    });
+
+    // Update fee structure
+    studentDues.totalPaid = (studentDues.totalPaid || 0) + amount;
+    studentDues.totalDue = Math.max(0, studentDues.totalDue - amount);
+    await studentDues.save();
+
+    // Create receipt
+    const receipt = await Receipt.create({
+      receiptNo: nextReceiptNo,
+      studentId,
+      paymentId: payment._id,
+      amount,
+      paymentMethod,
+      date: new Date(),
+      status: "generated",
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Payment processed successfully",
+      data: {
+        payment,
+        receipt,
+        receiptNumber: nextReceiptNo,
+      },
+    });
+  } catch (error) {
+    console.error("Payment processing error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// @desc    Get student payment history
+// @route   GET /api/fees/history/:studentId
+// @access  Private (Student)
+export const getPaymentHistory = asyncHandler(async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    const payments = await Payment.find({
+      studentId,
+      status: "completed",
+    }).sort("-paymentDate");
+
+    res.status(200).json({
+      success: true,
+      data: payments,
+      count: payments.length,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// @desc    Download receipt as PDF
+// @route   GET /api/fees/receipts/download/:paymentId
+// @access  Private (Student)
+export const downloadReceiptPDF = asyncHandler(async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
+    // Return receipt data (for PDF generation, use pdfkit or similar)
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=receipt_${payment.receiptNumber}.json`
+    );
+
+    res.status(200).json({
+      receiptNumber: payment.receiptNumber,
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod,
+      paymentDate: payment.paymentDate,
+      studentName: payment.studentName,
+      admissionNumber: payment.admissionNumber,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// @desc    Get fees analytics
+// @route   GET /api/fees/analytics
+// @access  Private (Admin/Accountant)
+export const getFeesAnalytics = asyncHandler(async (req, res) => {
+  try {
+    const { academicYear } = req.query;
+
+    // Total revenue
+    const totalRevenue = await Payment.aggregate([
+      { $match: { status: "completed", ...(academicYear && { academicYear }) } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+
+    // Total dues
+    const totalDues = await FeeStructure.aggregate([
+      { $group: { _id: null, total: { $sum: "$totalDue" } } },
+    ]);
+
+    // Payment trend
+    const paymentTrend = await Payment.aggregate([
+      { $match: { status: "completed", ...(academicYear && { academicYear }) } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$paymentDate" } },
+          count: { $sum: 1 },
+          amount: { $sum: "$amount" },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalRevenue: totalRevenue[0]?.total || 0,
+        totalDues: totalDues[0]?.total || 0,
+        collectionRate: totalRevenue[0]
+          ? (
+              (totalRevenue[0].total /
+                (totalRevenue[0].total + (totalDues[0]?.total || 0))) *
+              100
+            ).toFixed(2)
+          : 0,
+        paymentTrend,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// @desc    Export payments as CSV
+// @route   GET /api/fees/export/csv
+// @access  Private (Admin/Accountant)
+export const exportPaymentsCSV = asyncHandler(async (req, res) => {
+  try {
+    const { academicYear } = req.query;
+
+    const payments = await Payment.find({
+      status: "completed",
+      ...(academicYear && { academicYear }),
+    }).sort("-paymentDate");
+
+    let csv = "Receipt No,Student Name,Admission No,Amount,Method,Date\n";
+    payments.forEach((payment) => {
+      csv += `${payment.receiptNumber},"${payment.studentName}",${payment.admissionNumber},${payment.amount},${payment.paymentMethod},"${payment.paymentDate.toLocaleDateString()}"\n`;
+    });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=payments${academicYear ? "_" + academicYear : ""}.csv`
+    );
+
+    res.status(200).send(csv);
   } catch (error) {
     res.status(500).json({
       success: false,

@@ -1,5 +1,6 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const securitySettingSchema = new mongoose.Schema({
   schoolId: {
@@ -236,7 +237,6 @@ securitySettingSchema.methods.verifyApiKey = async function(apiKey) {
 
 // Method to generate new API key
 securitySettingSchema.methods.generateApiKey = function() {
-  const crypto = require('crypto');
   return `sk_${crypto.randomBytes(16).toString('hex')}`;
 };
 
@@ -245,4 +245,4 @@ securitySettingSchema.statics.findBySchool = function(schoolId) {
   return this.findOne({ schoolId }).select('-apiSecurity.apiKeyHash');
 };
 
-module.exports = mongoose.model('SecuritySetting', securitySettingSchema);
+export default mongoose.model('SecuritySetting', securitySettingSchema);

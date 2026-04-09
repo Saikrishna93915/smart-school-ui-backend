@@ -1,10 +1,8 @@
 import express from "express";
 import { protect, authorize } from "../middlewares/authMiddleware.js";
+import * as settingController from "../controllers/settingsControllerNew.js";
 
 const router = express.Router();
-
-// Mock controller functions (you can replace these with real ones later)
-const settingController = {
   getAllSettings: (req, res) => {
     res.json({
       success: true,

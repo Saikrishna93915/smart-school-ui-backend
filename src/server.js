@@ -3,9 +3,14 @@ import dotenv from "dotenv";
 import cors from "cors";
 import morgan from "morgan";
 import http from "http";
+import path from "path";
 import { Server } from "socket.io";
 import connectDB from "./config/db.js";
 import historyRoutes from './routes/historyRoutes.js';
+import errorHandler from "./middlewares/errorHandler.js";
+
+// Import scheduler service
+import { startShiftAutoCloseScheduler } from "./services/shiftAutoCloseService.js"; // ADDED: Global error handler
 
 /* =========================
    ROUTES IMPORTS
@@ -15,20 +20,56 @@ import adminRoutes from "./routes/adminRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import teacherRoutes from "./routes/teacherRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
+import studentAttendanceRoutes from "./routes/studentAttendanceRoutes.js"; // NEW: Student-specific attendance routes
 import examRoutes from "./routes/examRoutes.js";
 import studentSelfRoutes from "./routes/studentSelfRoutes.js";
 import financeRouter from "./routes/financeRoutes.js";
+import feesRoutes from "./routes/feesRoutes.js";
 import collectionsRouter from "./routes/collectionsRouter.js";
+import paymentRoutes from "./routes/paymentRoutes.js"; // NEW: Payment Management
 import reportRoutes from './routes/reportRoutes.js';
+import progressReportRoutes from './routes/progressReportRoutes.js';
 import feeDefaultersRoutes from './routes/feeDefaultersRoutes.js';
 import transportRoutes from "./routes/transportRoutes.js";
-import settingRoutes from "./routes/settingRoutes.js"; // ADDED SETTINGS ROUTES
+import settingsRoutesNew from "./routes/settingsRoutesNew.js"; // UPDATED SETTINGS ROUTES
+import userManagementRoutes from "./routes/userManagementRoutes.js"; // ADDED USER MANAGEMENT ROUTES
+
+// ==================== NEW ACADEMIC MODULE ROUTES ====================
+import subjectRoutes from "./routes/subjectRoutes.js"; // NEW: Subject Management
+import syllabusRoutes from "./routes/syllabusRoutes.js"; // NEW: Syllabus Management
+import teacherAssignmentRoutes from "./routes/teacherAssignmentRoutes.js"; // NEW: Teacher Assignments
+import diagnoseRoutes from "./routes/diagnoseRoutes.js"; // NEW: Diagnostics (troubleshooting)
+import certificateRoutes from "./routes/certificateRoutes.js"; // NEW: Certificate Management
+
+// ====================TEACHER MODULE ROUTES ====================
+import teacherDashboardRoutes from "./routes/teacherDashboardRoutes.js"; // Teacher dashboard
+import assignmentRoutes from "./routes/assignmentRoutes.js"; // Assignment management
+import studyMaterialRoutes from "./routes/studyMaterialRoutes.js"; // Study materials
+import performanceAnalyticsRoutes from "./routes/performanceAnalyticsRoutes.js"; // Performance analytics
+import communicationRoutes from "./routes/communicationRoutes.js"; // Announcements & messaging
+import classScheduleRoutes from "./routes/classScheduleRoutes.js"; // Class schedules
+import teacherLessonRoutes from "./routes/teacherLessonRoutes.js"; // Lesson plans
+import myClassesRoutes from "./routes/myClassesRoutes.js"; // My Classes management
+
+// ==================== TIMETABLE MODULE ROUTES ====================
+import timetableRoutes from "./routes/timetableRoutes.js"; // Timetable management
+import timeSlotRoutes from "./routes/timeSlotRoutes.js"; // Time slot management
+
+// ==================== DASHBOARD ROUTES ====================
+import dashboardRoutes from "./routes/dashboardRoutes.js"; // Dashboard analytics
+import activityRoutes from "./routes/activityRoutes.js"; // Activity tracking & logs
+
+// ==================== NEW ROLE MODULE ROUTES ====================
+import principalRoutes from "./routes/principalRoutes.js"; // Principal portal
+import cashierRoutes from "./routes/cashierRoutes.js"; // Cashier portal
+import cashierStatementRoutes from "./routes/cashierStatementRoutes.js"; // Cashier Statement/Transaction History
+import feeFollowUpRoutes from "./routes/feeFollowUpRoutes.js"; // Fee Follow-up & Email Campaigns
+import driverRoutes from "./routes/driverRoutes.js"; // Driver portal
 
 /* =========================
    ENV & DB CONFIG
 ========================= */
 dotenv.config();
-connectDB();
 
 /* =========================
    APP INITIALIZATION
@@ -36,16 +77,48 @@ connectDB();
 const app = express();
 const server = http.createServer(app);
 
+// SECURITY: Restrict CORS to known origins only
+const allowedOrigins = [
+  "http://localhost:8081",
+  "http://localhost:8082",
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://schoolerp1.netlify.app",
+  process.env.FRONTEND_URL,
+  // SECURITY: Uncomment tunnel URLs only during development
+  // /^https:\/\/[\w-]+\.incl\.devtunnels\.ms$/,
+  // /^https:\/\/[\w-]+\.tunnel\.cloudflare\.com$/,
+].filter(Boolean);
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+
+  return allowedOrigins.some((allowedOrigin) => {
+    if (typeof allowedOrigin === "string") {
+      return origin === allowedOrigin;
+    }
+
+    if (allowedOrigin instanceof RegExp) {
+      return allowedOrigin.test(origin);
+    }
+
+    return false;
+  });
+};
+
 /* =========================
    SOCKET.IO CONFIGURATION (for real-time transport updates)
 ========================= */
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:8081",
-      "http://localhost:5173",
-      "http://localhost:3000",
-    ],
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ Socket.IO CORS blocked origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     credentials: true,
   },
@@ -143,19 +216,23 @@ app.set("io", io);
 /* =========================
    BODY PARSER
 ========================= */
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+// SECURITY: Limit body size to prevent DoS attacks
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 /* =========================
    CORS
 ========================= */
 app.use(
   cors({
-    origin: [
-      "http://localhost:8081",
-      "http://localhost:5173",
-      "http://localhost:3000",
-    ],
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ CORS blocked origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
@@ -166,6 +243,7 @@ app.use(
    LOGGER
 ========================= */
 app.use(morgan("dev"));
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 /* =========================
    API ROUTES
@@ -175,23 +253,62 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/admin/students", studentRoutes);
 app.use("/api/admin/teachers", teacherRoutes);
 app.use("/api/admin/attendance", attendanceRoutes);
+app.use("/api/attendance", studentAttendanceRoutes); // NEW: Student-specific attendance endpoints
 app.use("/api/exams", examRoutes);
 app.use("/api/student", studentSelfRoutes);
 
 // ==================== FINANCE MODULE ROUTES ====================
 app.use("/api/finance", financeRouter);
+app.use("/api/fees", feesRoutes);
 app.use("/api/finance/collections", collectionsRouter);
+app.use("/api/finance/payments", paymentRoutes); // NEW: Payment Management
 app.use("/api/finance/fee-defaulters", feeDefaultersRoutes);
 
 // ==================== TRANSPORT MODULE ROUTES ====================
 app.use("/api/transport", transportRoutes);
 
+// ==================== ACADEMIC MODULE ROUTES (NEW) ====================
+app.use("/api/subjects", subjectRoutes); // Subject CRUD
+app.use("/api/syllabus", syllabusRoutes); // Syllabus management
+app.use("/api/teacher-assignments", teacherAssignmentRoutes); // Teacher-Subject assignments
+app.use("/api/certificates", certificateRoutes); // Certificate management
+
+// ==================== TEACHER MODULE ROUTES ====================
+app.use("/api/teacher/dashboard", teacherDashboardRoutes); // Teacher dashboard
+app.use("/api/teacher/assignments", assignmentRoutes); // Assignment management
+app.use("/api/teacher/materials", studyMaterialRoutes); // Study materials
+app.use("/api/teacher/analytics", performanceAnalyticsRoutes); // Performance analytics
+app.use("/api/teacher/announcements", communicationRoutes); // Announcements & messaging
+app.use("/api/teacher/schedule", classScheduleRoutes); // Class schedules
+app.use("/api/teacher/lessons", teacherLessonRoutes); // Lesson plans
+app.use("/api/teacher/classes", myClassesRoutes); // My Classes management
+
+// ==================== TIMETABLE MODULE ROUTES ====================
+app.use("/api/timetable", timetableRoutes); // Timetable management & scheduling
+app.use("/api/timeslots", timeSlotRoutes); // Time slot configuration
+
+// ==================== DIAGNOSTIC ROUTES ====================
+app.use("/api/diagnose", diagnoseRoutes); // Troubleshooting & diagnostics
+
+// ==================== DASHBOARD ROUTES ====================
+app.use("/api/dashboard", dashboardRoutes); // Admin dashboard analytics
+app.use("/api/activities", activityRoutes); // Activity tracking & recent logs
+
 // ==================== SETTINGS MODULE ROUTES ====================
-app.use("/api/settings", settingRoutes); // ADDED SETTINGS ROUTES
+app.use("/api/settings", settingsRoutesNew); // UPDATED SETTINGS ROUTES WITH REAL IMPLEMENTATION
+app.use("/api/admin/users", userManagementRoutes); // USER MANAGEMENT ROUTES
 
 // ==================== OTHER ROUTES ====================
 app.use('/api/history', historyRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/progress-reports', progressReportRoutes);
+
+// ==================== NEW ROLE PORTAL ROUTES ====================
+app.use("/api/principal", principalRoutes); // Principal read-only overview
+app.use("/api/cashier", cashierRoutes);     // Cashier fee collection
+app.use("/api/cashier", cashierStatementRoutes); // Cashier transaction history & statement
+app.use("/api/cashier/follow-ups", feeFollowUpRoutes); // Fee follow-up & bulk emails
+app.use("/api/driver", driverRoutes);       // Driver trip management
 
 /* =========================
    HEALTH ROUTES
@@ -297,23 +414,25 @@ app.get("/api-docs", (req, res) => {
 });
 
 /* =========================
-   GLOBAL ERROR HANDLER
+   GLOBAL ERROR HANDLER (PRODUCTION GRADE)
 ========================= */
-app.use((err, req, res, next) => {
-  console.error("❌ Error:", err);
-
-  res.status(err.statusCode || 500).json({
-    success: false,
-    message: err.message || "Internal Server Error",
-  });
-});
+app.use(errorHandler);
 
 /* =========================
    START SERVER
 ========================= */
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
+// Initialize database and start server
+const startServer = async () => {
+  try {
+    await connectDB();
+    console.log("✅ Database connected");
+    
+    // Start the shift auto-close scheduler
+    startShiftAutoCloseScheduler();
+    
+    server.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                                                                          ║
@@ -370,6 +489,36 @@ server.listen(PORT, () => {
 ║                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
   `);
+    });
+    
+  } catch (error) {
+    console.error("❌ Startup failed:", error);
+    process.exit(1);
+  }
+};
+
+startServer();
+
+// ==================== GLOBAL ERROR HANDLERS ====================
+// CRITICAL: Prevent unhandled rejections from crashing the server
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+  // Don't exit - log and continue
+});
+
+// CRITICAL: Prevent uncaught exceptions from crashing the server
+process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught Exception:", error.message);
+  console.error(error.stack);
+  // Gracefully shutdown and restart
+  server.close(() => {
+    process.exit(1);
+  });
+  // Force exit after 5 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error("❌ Forced shutdown after timeout");
+    process.exit(1);
+  }, 5000);
 });
 
 // Graceful shutdown

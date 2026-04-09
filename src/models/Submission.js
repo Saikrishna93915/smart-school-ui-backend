@@ -4,6 +4,7 @@ const answerSchema = new mongoose.Schema({
   questionId: String,
   selectedOptions: [Number],
   textAnswer: String,
+  rawAnswer: mongoose.Schema.Types.Mixed,
   codeAnswer: String,
   marksAwarded: Number
 });
@@ -20,7 +21,13 @@ const submissionSchema = new mongoose.Schema({
 
   answers: [answerSchema],
   totalMarksObtained: Number,
-  rank: Number
+  rank: Number,
+  submittedAt: Date,
+  evaluatedAt: Date,
+  progress: {
+    timeRemaining: Number,
+    lastSavedAt: Date
+  }
 }, { timestamps: true });
 
 export default mongoose.model("Submission", submissionSchema);

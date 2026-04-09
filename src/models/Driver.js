@@ -106,6 +106,11 @@ const driverSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      sparse: true
+    },
     isDeleted: {
       type: Boolean,
       default: false
@@ -116,11 +121,7 @@ const driverSchema = new mongoose.Schema(
   }
 );
 
-// Indexes
-driverSchema.index({ employeeId: 1 });
-driverSchema.index({ phone: 1 });
-driverSchema.index({ email: 1 });
-driverSchema.index({ licenseNo: 1 });
+// Indexes - Removed duplicates (unique fields already create indexes)
 driverSchema.index({ status: 1 });
 driverSchema.index({ assignedVehicle: 1 });
 

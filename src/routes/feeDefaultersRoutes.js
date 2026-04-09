@@ -14,8 +14,9 @@ import { protect, authorize } from '../middlewares/authMiddleware.js';
 const router = express.Router();
 
 // All routes require authentication and admin/finance role
+// All routes require authentication and admin/finance/cashier/principal role
 router.use(protect);
-router.use(authorize('admin', 'finance'));
+router.use(authorize('admin', 'finance', 'cashier', 'accountant', 'owner', 'principal'));
 
 // Main routes
 router.get('/', getFeeDefaulters);

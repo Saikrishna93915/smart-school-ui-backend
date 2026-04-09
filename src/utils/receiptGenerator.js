@@ -3,6 +3,9 @@ import { convertToWords } from "./numberToWords.js";
 export const generateReceiptHTML = (payment, receipt) => {
   const { schoolDetails, studentDetails, paymentDetails, amountDetails, feesBreakdown } = receipt;
 
+  // Get logo URL if available
+ const logoUrl = schoolDetails.logo || schoolDetails.logoUrl || '';
+
   return `
     <!DOCTYPE html>
     <html>
@@ -10,152 +13,146 @@ export const generateReceiptHTML = (payment, receipt) => {
       <meta charset="UTF-8">
       <title>Receipt ${receipt.receiptNumber}</title>
       <style>
+        @page {
+          size: A4;
+          margin: 10mm;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 10px; background: #fff; }
         .receipt-container { max-width: 800px; margin: 0 auto; }
-        .receipt { background: white; border: 2px solid #000; padding: 40px; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
-        .header { text-align: center; border-bottom: 3px double #000; padding-bottom: 25px; margin-bottom: 30px; }
-        .school-name { font-size: 32px; font-weight: 700; margin-bottom: 8px; color: #2c3e50; }
-        .school-tagline { font-size: 16px; color: #7f8c8d; margin-bottom: 15px; font-style: italic; }
-        .school-info { font-size: 13px; line-height: 1.6; color: #34495e; }
-        .receipt-title { font-size: 28px; text-align: center; margin: 25px 0; font-weight: 700; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }
-        .section { margin: 25px 0; }
-        .section-title { font-weight: 600; border-bottom: 2px solid #3498db; padding-bottom: 8px; margin-bottom: 15px; color: #2c3e50; font-size: 16px; }
-        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .detail-item { margin: 8px 0; }
-        .detail-label { font-weight: 600; color: #2c3e50; display: inline-block; min-width: 180px; }
-        .amount-table { width: 100%; border-collapse: collapse; margin: 25px 0; border: 1px solid #ddd; }
-        .amount-table th { background: #3498db; color: white; padding: 12px; text-align: left; font-weight: 600; }
-        .amount-table td { padding: 12px; border-bottom: 1px solid #ddd; }
-        .total-row { font-weight: 700; background: #f8f9fa; color: #2c3e50; }
-        .amount-words { font-style: italic; margin: 25px 0; padding: 15px; background: #f8f9fa; border-left: 4px solid #3498db; }
-        .signature { margin-top: 80px; text-align: center; }
-        .signature-line { width: 300px; border-top: 1px solid #000; margin: 40px auto 10px; }
-        .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #7f8c8d; border-top: 1px solid #ddd; padding-top: 15px; }
-        .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); font-size: 80px; color: rgba(0,0,0,0.05); z-index: -1; font-weight: bold; }
+        .receipt { background: white; border: 2px solid #000; padding: 15px; page-break-inside: avoid; }
+        
+        .header { text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; margin-bottom: 12px; }
+        .school-logo { max-width: 60px; max-height: 60px; margin: 0 auto 8px; display: block; }
+        .school-name { font-size: 20px; font-weight: 700; margin-bottom: 5px; color: #2c3e50; }
+        .school-info { font-size: 10px; line-height: 1.3; color: #6b7280; }
+        
+        .receipt-title { font-size: 16px; text-align: center; margin: 10px 0; font-weight: 700; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 8px 0; }
+        
+        .section { margin: 10px 0; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; background: #f9fafb; }
+        .section-title { font-weight: 600; margin-bottom: 8px; color: #2c3e50; font-size: 11px; }
+        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .detail-item { margin: 4px 0; font-size: 10px; }
+        .detail-label { font-weight: 600; color: #2c3e50; display: inline-block; }
+        
+        .amount-section { border: 2px solid #d1d5db; border-radius: 6px; padding: 10px; margin: 10px 0; background: #f9fafb; }
+        .amount-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+        .amount-item { text-align: center; font-size: 10px; }
+        .amount-label { color: #6b7280; margin-bottom: 3px; }
+        .amount-value { font-weight: 600; color: #2c3e50; }
+        
+        .total-amount { border-top: 2px solid #d1d5db; padding-top: 10px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .total-label { font-size: 12px; font-weight: 700; }
+        .total-value { font-size: 16px; font-weight: 700; color: #059669; }
+        
+        .amount-words { font-style: italic; margin: 10px 0; padding: 8px; background: #f3f4f6; border-left: 3px solid #3b82f6; font-size: 9px; }
+        
+        .footer-section { border-top: 1px solid #e5e7eb; padding-top: 10px; margin-top: 10px; font-size: 9px; display: flex; justify-content: space-between; align-items: start; }
+        .signature-text { font-size: 10px; margin-top: 25px; }
+        .disclaimer-text { font-size: 8px; color: #6b7280; margin-top: 8px; }
+        .footer-info { text-align: center; margin-top: 8px; font-size: 8px; color: #6b7280; }
+        
         @media print {
-          body { margin: 0; background: white; }
-          .no-print { display: none; }
-          .receipt { border: none; box-shadow: none; padding: 20px; }
-          .watermark { display: none; }
+          body { margin: 0; background: white; padding: 0; }
+          .no-print { display: none !important; }
+          .receipt { border: 2px solid #000; box-shadow: none; padding: 15px; }
+        }
+        @media screen {
+          body { background: #f5f5f5; padding: 20px; }
+          .receipt { box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         }
       </style>
     </head>
     <body>
-      <div class="watermark">PAID</div>
       <div class="receipt-container">
         <div class="receipt">
           <div class="header">
+            ${logoUrl ? `<img src="${logoUrl}" alt="School Logo" class="school-logo" onerror="this.style.display='none'" />` : ''}
             <div class="school-name">${schoolDetails.name}</div>
-            <div class="school-tagline">Smart Education Management System</div>
             <div class="school-info">
               ${schoolDetails.address}<br/>
-              Phone: ${schoolDetails.phone} | Email: ${schoolDetails.email}<br/>
-              Registration No: ${schoolDetails.registrationNo} | GSTIN: ${schoolDetails.gstin}
+              Phone: ${schoolDetails.phone} | Email: ${schoolDetails.email}
             </div>
           </div>
           
-          <div class="receipt-title">FEE PAYMENT RECEIPT</div>
+          <div class="receipt-title">Fee Payment Receipt</div>
           
           <div class="section">
-            <div class="section-title">Receipt Details</div>
+            <div class="section-title">Receipt Information</div>
             <div class="details-grid">
               <div class="detail-item"><span class="detail-label">Receipt No:</span> ${receipt.receiptNumber}</div>
-              <div class="detail-item"><span class="detail-label">Date:</span> ${new Date(paymentDetails.date).toLocaleDateString('en-IN')}</div>
-              <div class="detail-item"><span class="detail-label">Academic Year:</span> 2024-2025</div>
+              <div class="detail-item"><span class="detail-label">Date:</span> ${new Date(paymentDetails.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+              <div class="detail-item"><span class="detail-label">Time:</span> ${new Date(paymentDetails.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
             </div>
           </div>
           
           <div class="section">
-            <div class="section-title">Student Details</div>
+            <div class="section-title">Student Information</div>
             <div class="details-grid">
               <div class="detail-item"><span class="detail-label">Student Name:</span> ${studentDetails.name}</div>
               <div class="detail-item"><span class="detail-label">Admission No:</span> ${studentDetails.admissionNumber}</div>
-              <div class="detail-item"><span class="detail-label">Class & Section:</span> ${studentDetails.className} - ${studentDetails.section}</div>
-              <div class="detail-item"><span class="detail-label">Parent Name:</span> ${studentDetails.parentName}</div>
-              <div class="detail-item"><span class="detail-label">Parent Contact:</span> ${studentDetails.parentPhone}</div>
-              <div class="detail-item"><span class="detail-label">Parent Email:</span> ${studentDetails.parentEmail || 'N/A'}</div>
+              <div class="detail-item"><span class="detail-label">Class:</span> ${studentDetails.className} ${studentDetails.section ? `• ${studentDetails.section}` : ''}</div>
+              <div class="detail-item"><span class="detail-label">Roll No:</span> N/A</div>
             </div>
           </div>
           
           <div class="section">
-            <div class="section-title">Payment Details</div>
+            <div class="section-title">Payment Information</div>
             <div class="details-grid">
-              <div class="detail-item"><span class="detail-label">Payment Method:</span> ${paymentDetails.method.toUpperCase()}</div>
-              <div class="detail-item"><span class="detail-label">Reference No:</span> ${paymentDetails.reference || 'N/A'}</div>
-              ${paymentDetails.bankName ? `<div class="detail-item"><span class="detail-label">Bank Name:</span> ${paymentDetails.bankName}</div>` : ''}
-              ${paymentDetails.chequeNo ? `<div class="detail-item"><span class="detail-label">Cheque No:</span> ${paymentDetails.chequeNo}</div>` : ''}
+              <div class="detail-item"><span class="detail-label">Payment Method:</span> ${paymentDetails.method}</div>
+              <div class="detail-item"><span class="detail-label">Description:</span> ${feesBreakdown.length > 0 ? `Payment for ${feesBreakdown.length} due payment(s)` : 'Fee Payment'}</div>
+              <div class="detail-item" style="grid-column: span 2;"><span class="detail-label">Status:</span> COMPLETED</div>
             </div>
           </div>
           
-          <table class="amount-table">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th>Amount (₹)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Fee Amount</td>
-                <td>${amountDetails.totalAmount.toLocaleString('en-IN')}</td>
-              </tr>
-              ${amountDetails.discount > 0 ? `
-              <tr>
-                <td>Discount (${amountDetails.discountReason || 'General'})</td>
-                <td>- ${amountDetails.discount.toLocaleString('en-IN')}</td>
-              </tr>
-              ` : ''}
-              ${amountDetails.lateFee > 0 ? `
-              <tr>
-                <td>Late Fee (${amountDetails.lateFeeReason || 'Late Payment'})</td>
-                <td>+ ${amountDetails.lateFee.toLocaleString('en-IN')}</td>
-              </tr>
-              ` : ''}
-              <tr class="total-row">
-                <td>TOTAL AMOUNT PAYABLE</td>
-                <td><strong>₹ ${amountDetails.netAmount.toLocaleString('en-IN')}</strong></td>
-              </tr>
-            </tbody>
-          </table>
-          
-          <div class="amount-words">
-            <strong>Amount in Words:</strong> ${amountDetails.amountInWords}
-          </div>
-          
-          ${feesBreakdown.length > 0 ? `
-          <div class="section">
-            <div class="section-title">Fees Paid</div>
-            <ul style="list-style: none; padding: 0;">
-              ${feesBreakdown.map(fee => `
-                <li style="padding: 5px 0; border-bottom: 1px dashed #ddd;">
-                  <strong>${fee.feeType}</strong> - Amount: ₹${fee.amount.toLocaleString('en-IN')} ${fee.dueDate ? `- Due: ${new Date(fee.dueDate).toLocaleDateString('en-IN')}` : ''}
-                </li>
-              `).join('')}
-            </ul>
-          </div>
-          ` : ''}
-          
-          <div class="signature">
-            <div class="signature-line"></div>
-            <div style="margin-top: 10px;">
-              <strong style="font-size: 16px;">${schoolDetails.principal}</strong><br/>
-              <span style="color: #7f8c8d;">Principal</span><br/>
-              ${schoolDetails.name}
+          <div class="amount-section">
+            <div class="amount-grid">
+              <div class="amount-item">
+                <div class="amount-label">Amount</div>
+                <div class="amount-value">₹${amountDetails.totalAmount.toLocaleString('en-IN')}</div>
+              </div>
+              <div class="amount-item">
+                <div class="amount-label">Discount</div>
+                <div class="amount-value">₹${amountDetails.discount.toLocaleString('en-IN')}</div>
+              </div>
+              <div class="amount-item">
+                <div class="amount-label">Late Fee</div>
+                <div class="amount-value">₹${amountDetails.lateFee.toLocaleString('en-IN')}</div>
+              </div>
+              <div class="amount-item">
+                <div class="amount-label">Net Amount</div>
+                <div class="amount-value" style="color: #059669;">₹${amountDetails.netAmount.toLocaleString('en-IN')}</div>
+              </div>
+            </div>
+            <div class="total-amount">
+              <span class="total-label">Amount Paid:</span>
+              <span class="total-value">₹${amountDetails.netAmount.toLocaleString('en-IN')}</span>
             </div>
           </div>
           
-          <div class="footer">
-            <em>This is a computer generated receipt. No signature required.</em><br/>
-            <span style="color: #e74c3c;">Please keep this receipt for future reference.</span>
+          <div class="footer-section">
+            <div>
+              <div class="detail-label">Collected By:</div>
+              <div style="font-size: 10px; margin-top: 2px;">${paymentDetails.collectedBy || 'System'}</div>
+            </div>
+            <div style="text-align: right;">
+              <div class="signature-text" style="font-weight: 600;">Authorized Signature</div>
+              <div class="disclaimer-text">
+                This is a computer generated receipt. No signature required.
+              </div>
+            </div>
+          </div>
+          
+          <div class="footer-info">
+            ${schoolDetails.name} | ${schoolDetails.address}
           </div>
         </div>
         
-        <div class="no-print" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
-          <button onclick="window.print()" style="padding: 12px 30px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin: 10px;">
+        <div class="no-print" style="text-align: center; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+          <button onclick="window.print()" style="padding: 12px 30px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; margin: 10px; font-weight: 600;">
             🖨️ Print Receipt
           </button>
-          <button onclick="window.close()" style="padding: 12px 30px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin: 10px;">
+          <button onclick="window.close()" style="padding: 12px 30px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; margin: 10px; font-weight: 600;">
             ✖️ Close
           </button>
         </div>
@@ -168,7 +165,7 @@ export const generateReceiptHTML = (payment, receipt) => {
           if (urlParams.get('print') === 'true') {
             setTimeout(() => {
               window.print();
-            }, 1000);
+            }, 500);
           }
         };
       </script>

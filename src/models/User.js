@@ -37,7 +37,7 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["admin", "owner", "teacher", "student", "parent"],
+      enum: ["admin", "owner", "teacher", "student", "parent", "cashier", "principal", "driver"],
       required: true
     },
 
@@ -62,28 +62,21 @@ const userSchema = new mongoose.Schema(
 );
 
 /* =========================
-   FIXED: HASH PASSWORD BEFORE SAVE
+   HASH PASSWORD BEFORE SAVE
 ========================= */
-userSchema.pre("save", async function(next) {
-  // Check if next is a function
-  if (typeof next !== 'function') {
-    console.error("❌ ERROR: 'next' is not a function in pre-save middleware");
-    return;
-  }
-  
+userSchema.pre("save", async function() {
   try {
     // Only hash the password if it has been modified (or is new)
     if (!this.isModified("password")) {
-      return next();
+      return;
     }
     
     // Hash password with salt rounds
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
-    
-    next();
   } catch (error) {
-    next(error);
+    console.error("❌ Password hashing error:", error);
+    throw error;
   }
 });
 

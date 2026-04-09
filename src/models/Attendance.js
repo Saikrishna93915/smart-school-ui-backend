@@ -61,7 +61,7 @@ const attendanceSchema = new mongoose.Schema(
 
     markedRole: {
       type: String,
-      enum: ["admin"],
+      enum: ["admin", "owner"],
       default: "admin",
     },
   },

@@ -30,7 +30,12 @@ export const protect = async (req, res, next) => {
       });
     }
 
+    // Ensure linkedId is included (fallback to decoded JWT value if not in DB)
     req.user = user;
+    if (!req.user.linkedId && decoded.linkedId) {
+      req.user.linkedId = decoded.linkedId;
+    }
+    
     next();
   } catch (error) {
     console.error("Auth Middleware Error:", error.message);

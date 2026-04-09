@@ -35,7 +35,7 @@ export const generatePDFReport = async (data, fileName) => {
       // Add summary section
       if (data.summary) {
         doc.fontSize(14).text('Summary:');
-        doc.fontSize(12).text(`Total Amount: ₹${data.summary.totalAmount.toLocaleString('en-IN')}`);
+        doc.fontSize(12).text(`Total Amount: INR ${data.summary.totalAmount.toLocaleString('en-IN')}`);
         doc.text(`Total Transactions: ${data.summary.totalTransactions}`);
         doc.text(`Success Rate: ${data.summary.successRate.toFixed(1)}%`);
         doc.moveDown();
@@ -47,7 +47,7 @@ export const generatePDFReport = async (data, fileName) => {
           if (data.dailyTrend && data.dailyTrend.length > 0) {
             doc.fontSize(14).text('Daily Trend:');
             data.dailyTrend.forEach(item => {
-              doc.text(`${item.date}: ₹${item.amount.toLocaleString('en-IN')} (${item.transactions} transactions)`);
+              doc.text(`${item.date}: INR ${item.amount.toLocaleString('en-IN')} (${item.transactions} transactions)`);
             });
           }
           break;
@@ -56,7 +56,32 @@ export const generatePDFReport = async (data, fileName) => {
           if (data.defaulters && data.defaulters.length > 0) {
             doc.fontSize(14).text('Top Defaulters:');
             data.defaulters.slice(0, 10).forEach((defaulter, index) => {
-              doc.text(`${index + 1}. ${defaulter.studentName} - ₹${defaulter.totalDue.toLocaleString('en-IN')}`);
+              doc.text(`${index + 1}. ${defaulter.studentName} - INR ${defaulter.totalDue.toLocaleString('en-IN')}`);
+            });
+          }
+          break;
+
+        case 'student-performance':
+          if (Array.isArray(data.details) && data.details.length > 0) {
+            doc.fontSize(14).text('Student Payment Performance (Top 10):');
+            data.details.slice(0, 10).forEach((student, index) => {
+              doc.text(
+                `${index + 1}. ${student.studentName || 'Unknown'} (${student.className || 'N/A'}) - ` +
+                `INR ${(student.totalPaid || 0).toLocaleString('en-IN')} | ` +
+                `Consistency: ${(student.paymentConsistency || 0)}%`
+              );
+            });
+          }
+          break;
+
+        case 'forecast':
+          if (Array.isArray(data.forecast) && data.forecast.length > 0) {
+            doc.fontSize(14).text('Revenue Forecast (Next 3 Months):');
+            data.forecast.forEach((item) => {
+              doc.text(
+                `Month +${item.monthOffset}: INR ${(item.amount || 0).toLocaleString('en-IN')} ` +
+                `(${item.transactions || 0} transactions)`
+              );
             });
           }
           break;
@@ -143,6 +168,37 @@ export const generateExcelReport = async (data, fileName) => {
           });
         }
         break;
+
+      case 'student-performance':
+        if (Array.isArray(data.details) && data.details.length > 0) {
+          worksheet.addRow(['STUDENT PERFORMANCE']);
+          worksheet.addRow(['Student Name', 'Class', 'Total Paid', 'Payment Count', 'Consistency %', 'Risk']);
+          data.details.forEach((student) => {
+            worksheet.addRow([
+              student.studentName || 'Unknown',
+              student.className || 'N/A',
+              student.totalPaid || 0,
+              student.paymentCount || 0,
+              student.paymentConsistency || 0,
+              student.riskCategory || 'N/A'
+            ]);
+          });
+        }
+        break;
+
+      case 'forecast':
+        if (Array.isArray(data.forecast) && data.forecast.length > 0) {
+          worksheet.addRow(['REVENUE FORECAST']);
+          worksheet.addRow(['Month Offset', 'Projected Amount', 'Projected Transactions']);
+          data.forecast.forEach((item) => {
+            worksheet.addRow([
+              item.monthOffset,
+              item.amount || 0,
+              item.transactions || 0
+            ]);
+          });
+        }
+        break;
     }
     
     // Style the header row
@@ -192,6 +248,36 @@ export const generateCSVReport = async (data, fileName) => {
           csvContent += 'Student Name,Class,Total Due,Pending Count\n';
           data.defaulters.forEach(defaulter => {
             csvContent += `${defaulter.studentName},${defaulter.className},${defaulter.totalDue},${defaulter.pendingCount}\n`;
+          });
+        }
+        break;
+
+      case 'payment-methods':
+        if (data.methodDistribution && data.methodDistribution.length > 0) {
+          csvContent += 'Payment Method Distribution\n';
+          csvContent += 'Method,Total Amount,Count,Average Amount\n';
+          data.methodDistribution.forEach((method) => {
+            csvContent += `${method.method},${method.totalAmount},${method.count},${method.avgAmount}\n`;
+          });
+        }
+        break;
+
+      case 'student-performance':
+        if (Array.isArray(data.details) && data.details.length > 0) {
+          csvContent += 'Student Performance\n';
+          csvContent += 'Student Name,Class,Total Paid,Payment Count,Consistency,Risk\n';
+          data.details.forEach((student) => {
+            csvContent += `${student.studentName || 'Unknown'},${student.className || 'N/A'},${student.totalPaid || 0},${student.paymentCount || 0},${student.paymentConsistency || 0},${student.riskCategory || 'N/A'}\n`;
+          });
+        }
+        break;
+
+      case 'forecast':
+        if (Array.isArray(data.forecast) && data.forecast.length > 0) {
+          csvContent += 'Revenue Forecast\n';
+          csvContent += 'Month Offset,Projected Amount,Projected Transactions\n';
+          data.forecast.forEach((item) => {
+            csvContent += `${item.monthOffset},${item.amount || 0},${item.transactions || 0}\n`;
           });
         }
         break;

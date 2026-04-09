@@ -82,6 +82,11 @@ export const generateReport = asyncHandler(async (req, res) => {
       filter.status = status;
     }
 
+    // For collection reports, default to completed payments unless user explicitly picks status
+    if (reportType === 'collection' && !filter.status) {
+      filter.status = 'completed';
+    }
+
     console.log('🔍 Report filter:', filter);
 
     let reportData;
@@ -140,6 +145,26 @@ export const generateReport = asyncHandler(async (req, res) => {
           includeRecommendations
         });
         fileName = `annual-report-${Date.now()}`;
+        break;
+
+      case 'student-performance':
+        reportData = await generateStudentPerformanceReport(filter, {
+          includeCharts,
+          includeDetails,
+          includeSummary,
+          includeRecommendations
+        });
+        fileName = `student-performance-report-${Date.now()}`;
+        break;
+
+      case 'forecast':
+        reportData = await generateForecastReport(filter, {
+          includeCharts,
+          includeDetails,
+          includeSummary,
+          includeRecommendations
+        });
+        fileName = `forecast-report-${Date.now()}`;
         break;
 
       default:
@@ -807,6 +832,146 @@ const generateAnnualReport = async (filter, options) => {
     return reportData;
   } catch (error) {
     console.error('Generate annual report error:', error);
+    throw error;
+  }
+};
+
+const generateStudentPerformanceReport = async (filter, options) => {
+  try {
+    const performanceData = await Payment.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: '$studentId',
+          studentName: { $first: '$studentName' },
+          className: { $first: '$className' },
+          totalPaid: { $sum: '$netAmount' },
+          paymentCount: { $sum: 1 },
+          completedCount: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+          },
+          latestPaymentDate: { $max: '$paymentDate' }
+        }
+      },
+      { $sort: { totalPaid: -1 } },
+      { $limit: 200 }
+    ]);
+
+    const enriched = performanceData.map((item) => ({
+      ...item,
+      paymentConsistency: item.paymentCount > 0 ? Number(((item.completedCount / item.paymentCount) * 100).toFixed(1)) : 0,
+      riskCategory:
+        item.paymentCount === 0
+          ? 'high'
+          : item.completedCount / item.paymentCount >= 0.9
+          ? 'low'
+          : item.completedCount / item.paymentCount >= 0.7
+          ? 'medium'
+          : 'high'
+    }));
+
+    const reportData = {
+      reportType: 'student-performance',
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalAmount: enriched.reduce((sum, item) => sum + (item.totalPaid || 0), 0),
+        totalTransactions: enriched.reduce((sum, item) => sum + (item.paymentCount || 0), 0),
+        successRate: enriched.length
+          ? enriched.reduce((sum, item) => sum + (item.paymentConsistency || 0), 0) / enriched.length
+          : 0,
+      },
+      details: enriched,
+      recommendations: options.includeRecommendations
+        ? [
+            'Follow up with high-risk students for pending payments.',
+            'Introduce reminders for low-consistency accounts.',
+            'Recognize consistent fee payers to improve compliance.'
+          ]
+        : [],
+      filterApplied: filter,
+      options,
+    };
+
+    return reportData;
+  } catch (error) {
+    console.error('Generate student performance report error:', error);
+    throw error;
+  }
+};
+
+const generateForecastReport = async (filter, options) => {
+  try {
+    const historical = await Payment.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$paymentDate' },
+            month: { $month: '$paymentDate' }
+          },
+          amount: { $sum: '$netAmount' },
+          transactions: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+      { $limit: 12 }
+    ]);
+
+    const normalizedHistory = historical.map((item) => ({
+      period: `${item._id.year}-${String(item._id.month).padStart(2, '0')}`,
+      amount: item.amount || 0,
+      transactions: item.transactions || 0,
+    }));
+
+    const averageAmount = normalizedHistory.length
+      ? normalizedHistory.reduce((sum, item) => sum + item.amount, 0) / normalizedHistory.length
+      : 0;
+    const averageTransactions = normalizedHistory.length
+      ? normalizedHistory.reduce((sum, item) => sum + item.transactions, 0) / normalizedHistory.length
+      : 0;
+
+    const growthFactor = normalizedHistory.length >= 2
+      ? (normalizedHistory[normalizedHistory.length - 1].amount || 0) /
+        Math.max(normalizedHistory[0].amount || 1, 1)
+      : 1;
+
+    const projected = Array.from({ length: 3 }, (_, index) => {
+      const monthOffset = index + 1;
+      const projectedAmount = averageAmount * (1 + (growthFactor - 1) * (monthOffset / 6));
+      const projectedTransactions = Math.round(
+        averageTransactions * (1 + (growthFactor - 1) * (monthOffset / 8))
+      );
+      return {
+        monthOffset,
+        amount: Math.max(0, Math.round(projectedAmount)),
+        transactions: Math.max(0, projectedTransactions),
+      };
+    });
+
+    const reportData = {
+      reportType: 'forecast',
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalAmount: normalizedHistory.reduce((sum, item) => sum + item.amount, 0),
+        totalTransactions: normalizedHistory.reduce((sum, item) => sum + item.transactions, 0),
+        successRate: 100,
+      },
+      historical: normalizedHistory,
+      forecast: projected,
+      recommendations: options.includeRecommendations
+        ? [
+            'Increase reminders before due dates to stabilize monthly cash flow.',
+            'Expand digital payment options to improve forecast reliability.',
+            'Track class-wise collection variance for better planning.'
+          ]
+        : [],
+      filterApplied: filter,
+      options,
+    };
+
+    return reportData;
+  } catch (error) {
+    console.error('Generate forecast report error:', error);
     throw error;
   }
 };

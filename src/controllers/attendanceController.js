@@ -63,6 +63,12 @@ export const markAttendance = async (req, res) => {
     const attendanceDate = new Date(date);
     attendanceDate.setUTCHours(0, 0, 0, 0);
 
+    const normalizeSessionValue = (value) => {
+      if (value === true || value === 'true' || value === 'present') return 'present';
+      if (value === false || value === 'false' || value === 'absent') return 'absent';
+      return undefined;
+    };
+
     const bulkOps = attendance.map((record) => {
       const updateFields = {
         studentId: record.studentId,
@@ -74,10 +80,12 @@ export const markAttendance = async (req, res) => {
       };
 
       if (record.morning !== undefined && record.morning !== null) {
-        updateFields["sessions.morning"] = String(record.morning);
+        const morningValue = normalizeSessionValue(record.morning);
+        if (morningValue) updateFields["sessions.morning"] = morningValue;
       }
       if (record.afternoon !== undefined && record.afternoon !== null) {
-        updateFields["sessions.afternoon"] = String(record.afternoon);
+        const afternoonValue = normalizeSessionValue(record.afternoon);
+        if (afternoonValue) updateFields["sessions.afternoon"] = afternoonValue;
       }
 
       return {
@@ -183,6 +191,7 @@ export const getWorkingDaysCount = async (req, res) => {
 export const getAttendanceSummary = async (req, res) => {
   try {
     const { className, section, date } = req.query;
+    const presentValues = ["present", "true", true];
 
     if (!className || !date) {
       return res.status(400).json({ message: "Class and Date are required." });
@@ -220,8 +229,8 @@ export const getAttendanceSummary = async (req, res) => {
               $cond: [
                 { 
                   $and: [
-                    { $or: [{ $eq: ["$sessions.morning", "true"] }, { $eq: ["$sessions.morning", true] }] },
-                    { $or: [{ $eq: ["$sessions.afternoon", "true"] }, { $eq: ["$sessions.afternoon", true] }] }
+                    { $in: ["$sessions.morning", presentValues] },
+                    { $in: ["$sessions.afternoon", presentValues] }
                   ] 
                 }, 1, 0
               ] 
@@ -234,14 +243,14 @@ export const getAttendanceSummary = async (req, res) => {
                   $or: [
                     { 
                       $and: [
-                        { $or: [{ $eq: ["$sessions.morning", "true"] }, { $eq: ["$sessions.morning", true] }] },
-                        { $and: [{ $ne: ["$sessions.afternoon", "true"] }, { $ne: ["$sessions.afternoon", true] }] }
+                        { $in: ["$sessions.morning", presentValues] },
+                        { $not: [{ $in: ["$sessions.afternoon", presentValues] }] }
                       ] 
                     },
                     { 
                       $and: [
-                        { $or: [{ $eq: ["$sessions.afternoon", "true"] }, { $eq: ["$sessions.afternoon", true] }] },
-                        { $and: [{ $ne: ["$sessions.morning", "true"] }, { $ne: ["$sessions.morning", true] }] }
+                        { $in: ["$sessions.afternoon", presentValues] },
+                        { $not: [{ $in: ["$sessions.morning", presentValues] }] }
                       ] 
                     }
                   ]

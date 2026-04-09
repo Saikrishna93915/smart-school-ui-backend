@@ -6,7 +6,6 @@ const feeStructureSchema = new mongoose.Schema(
     admissionNumber: {
       type: String,
       required: true,
-      unique: true,
       ref: "Student",
     },
     studentId: {
@@ -119,6 +118,9 @@ const feeStructureSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Compound unique index: one fee structure per student per academic year
+feeStructureSchema.index({ admissionNumber: 1, academicYear: 1 }, { unique: true });
 
 // FIXED Pre-save middleware - ASYNC VERSION (no next parameter issue)
 feeStructureSchema.pre("save", async function() {

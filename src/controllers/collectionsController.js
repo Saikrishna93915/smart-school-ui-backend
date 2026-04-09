@@ -21,55 +21,61 @@ export const getCollections = asyncHandler(async (req, res) => {
       collectedBy,
       page = 1,
       limit = 20,
-      sortBy = 'paymentDate',
+      sortBy = 'createdAt',
       sortOrder = 'desc'
     } = req.query;
 
-    // Build match stage
+    // Build match stage - EXACT matching for all filters
     const matchStage = {};
 
-    // Only get receipt type payments
-    matchStage.paymentType = { $in: ['receipt', 'payment'] };
+    // Base status filter (exclude cancelled)
     matchStage.status = { $ne: 'cancelled' };
 
-    // Search filter
-    if (search && search.trim()) {
-      matchStage.$or = [
-        { studentName: { $regex: search, $options: 'i' } },
-        { admissionNumber: { $regex: search, $options: 'i' } },
-        { receiptNumber: { $regex: search, $options: 'i' } },
-        { 'studentDetails.student.firstName': { $regex: search, $options: 'i' } },
-        { 'studentDetails.student.lastName': { $regex: search, $options: 'i' } },
-        { parentName: { $regex: search, $options: 'i' } },
-        { parentPhone: { $regex: search, $options: 'i' } }
-      ];
+    // CRITICAL: Normalize all filters to handle case and whitespace consistently
+    const normalizedClassName = className ? className.trim() : '';
+    const normalizedStatus = status ? status.trim().toLowerCase() : '';
+    const normalizedPaymentMethod = paymentMethod ? paymentMethod.trim().toLowerCase().replace('_', '-') : '';
+
+    // Class filter - EXACT string match (case-insensitive via aggregation)
+    if (normalizedClassName && normalizedClassName !== 'all classes') {
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({
+        $expr: {
+          $eq: [
+            { $toLower: { $ifNull: ['$className', ''] } },
+            normalizedClassName.toLowerCase()
+          ]
+        }
+      });
     }
 
-    // Class filter
-    if (className && className !== 'All Classes') {
-      matchStage.className = className;
-    }
-
-    // Status filter
-    if (status && status !== 'All Status') {
-      if (status === 'completed') {
-        matchStage.status = 'completed';
-      } else if (status === 'pending') {
-        matchStage.$or = [
-          { status: 'pending' },
-          { status: 'partial' }
-        ];
-      } else if (status === 'failed') {
-        matchStage.$or = [
-          { status: 'failed' },
-          { status: 'cancelled' }
-        ];
+    // Status filter - EXACT match with proper enum values
+    if (normalizedStatus && normalizedStatus !== 'all status') {
+      let statusFilter;
+      if (normalizedStatus === 'completed') {
+        statusFilter = 'completed';
+      } else if (normalizedStatus === 'pending') {
+        statusFilter = { $in: ['pending', 'partial'] };
+      } else if (normalizedStatus === 'failed') {
+        statusFilter = { $in: ['failed', 'cancelled'] };
+      } else {
+        statusFilter = normalizedStatus;
       }
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({ status: statusFilter });
     }
 
-    // Payment method filter
-    if (paymentMethod && paymentMethod !== 'All Methods') {
-      matchStage.paymentMethod = paymentMethod;
+    // Payment method filter - EXACT match with normalization
+    if (normalizedPaymentMethod && normalizedPaymentMethod !== 'all methods') {
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({
+        $expr: {
+          $eq: [
+            { $toLower: { $ifNull: ['$paymentMethod', ''] } },
+            normalizedPaymentMethod
+          ]
+        }
+      });
     }
 
     // Date range filter
@@ -83,12 +89,15 @@ export const getCollections = asyncHandler(async (req, res) => {
       }
     }
 
-    // Collected by filter
+    // Collected by filter - CRITICAL FIX: Use $and to avoid overwriting search filter
     if (collectedBy && collectedBy !== 'All Collectors') {
-      matchStage.$or = [
-        { recordedByName: { $regex: collectedBy, $options: 'i' } },
-        { recordedBy: collectedBy }
-      ];
+      if (!matchStage.$and) matchStage.$and = [];
+      matchStage.$and.push({
+        $or: [
+          { recordedByName: { $regex: collectedBy, $options: 'i' } },
+          { recordedBy: collectedBy }
+        ]
+      });
     }
 
     const db = mongoose.connection.db;
@@ -235,16 +244,19 @@ export const getCollections = asyncHandler(async (req, res) => {
     const countResult = await paymentsCollection.aggregate(countPipeline).toArray();
     const total = countResult[0]?.total || 0;
 
-    // Stage 6: Add sorting
+    // Stage 6: Add sorting - CRITICAL: Default to createdAt for proper ordering
     const sortStage = {};
-    if (sortBy === 'paymentDate') {
+    if (sortBy === 'createdAt') {
+      sortStage.createdAt = sortOrder === 'desc' ? -1 : 1;
+    } else if (sortBy === 'paymentDate') {
       sortStage.paymentDate = sortOrder === 'desc' ? -1 : 1;
     } else if (sortBy === 'amount') {
       sortStage.amount = sortOrder === 'desc' ? -1 : 1;
     } else if (sortBy === 'studentName') {
       sortStage.studentName = sortOrder === 'asc' ? 1 : -1;
     } else {
-      sortStage.paymentDate = -1;
+      // CRITICAL: Default to createdAt descending (latest first)
+      sortStage.createdAt = -1;
     }
     pipeline.push({ $sort: sortStage });
 
@@ -398,6 +410,34 @@ export const getCollections = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Get unique class names for filter dropdown
+// @route   GET /api/finance/collections/classes
+// @access  Private (Admin/Finance)
+export const getCollectionClasses = asyncHandler(async (req, res) => {
+  const db = mongoose.connection.db;
+  const paymentsCollection = db.collection('payments');
+
+  // Get unique class names using aggregation
+  const classes = await paymentsCollection.aggregate([
+    { $match: { status: { $ne: 'cancelled' } } },
+    { $group: { _id: '$className' } },
+    { $sort: { _id: 1 } }
+  ]).toArray();
+
+  // Filter out null/empty class names and return clean array
+  const uniqueClasses = classes
+    .map(c => c._id)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  res.json({
+    success: true,
+    data: {
+      classes: uniqueClasses
+    }
+  });
+});
+
 // @desc    Get collection details
 // @route   GET /api/finance/collections/:receiptNumber
 // @access  Private (Admin/Finance)
@@ -412,9 +452,9 @@ export const getCollectionDetails = asyncHandler(async (req, res) => {
     const studentsCollection = db.collection('students');
 
     // Get payment
-    const payment = await paymentsCollection.findOne({ 
+    const payment = await paymentsCollection.findOne({
       receiptNumber,
-      paymentType: { $in: ['receipt', 'payment'] }
+      paymentType: { $in: ['receipt', 'payment', 'installment'] }
     });
 
     if (!payment) {
@@ -558,8 +598,11 @@ export const updateCollectionStatus = asyncHandler(async (req, res) => {
       updateData.statusNotes = notes;
     }
 
-    // If marking as refunded, also mark related due payments
+    // If marking as refunded, also mark related due payments and log the action
     if (status === 'refunded') {
+      // CRITICAL: Log refund action for audit trail
+      console.log(`⚠️ REFUND: Receipt ${receiptNumber} (₹${payment.amount}) refunded by ${req.user.name} (${req.user.role}). Admission: ${payment.admissionNumber}`);
+
       // Find related installments and mark as pending
       await paymentsCollection.updateMany(
         {
@@ -629,7 +672,7 @@ export const exportCollections = asyncHandler(async (req, res) => {
 
     // Build match stage
     const matchStage = {
-      paymentType: { $in: ['receipt', 'payment'] },
+      paymentType: { $in: ['receipt', 'payment', 'installment', null, undefined] },
       status: { $ne: 'cancelled' }
     };
 
@@ -774,8 +817,16 @@ export const exportCollections = asyncHandler(async (req, res) => {
       collection.description || ''
     ]);
 
+    // CRITICAL: CSV injection prevention - sanitize fields starting with =, +, -, @
+    const sanitizeCSV = (val) => {
+      const str = String(val).replace(/"/g, '""');
+      // Prevent CSV injection (Excel formula execution)
+      if (/^[=+\-@]/.test(str)) return "'" + str;
+      return str;
+    };
+
     const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .map(row => row.map(cell => `"${sanitizeCSV(cell)}"`).join(','))
       .join('\n');
 
     // Set response headers
@@ -809,7 +860,7 @@ export const getCollectionsStatistics = asyncHandler(async (req, res) => {
     const overallPipeline = [
       {
         $match: {
-          paymentType: { $in: ['receipt', 'payment'] },
+          paymentType: { $in: ['receipt', 'payment', 'installment', null, undefined] },
           status: { $ne: 'cancelled' }
         }
       },

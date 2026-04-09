@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const paymentSchema = new mongoose.Schema({
   receiptNumber: {
@@ -179,4 +179,4 @@ studentFeeSchema.methods.generateReceiptNumber = function() {
   return `REC-${year}${month}${day}-${random}`;
 };
 
-module.exports = mongoose.model('StudentFee', studentFeeSchema);
+export default mongoose.model('StudentFee', studentFeeSchema);
