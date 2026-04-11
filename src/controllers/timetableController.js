@@ -2,7 +2,6 @@ import Timetable from '../models/Timetable.js';
 import TimetableSlot from '../models/TimetableSlot.js';
 import TimeSlot from '../models/TimeSlot.js';
 import Class from '../models/Class.js';
-import TeacherAssignment from '../models/TeacherAssignment.js';
 import Teacher from '../models/Teacher.js';
 import User from '../models/User.js';
 import conflictDetectionService from '../services/conflictDetectionService.js';
@@ -51,56 +50,8 @@ async function resolveTeacherUserId(teacherId) {
 }
 
 async function resolveTeacherUserIdForSlot({ timetable, subjectId }) {
-  if (!timetable || !subjectId) return null;
-
-  const classDoc = await Class.findById(timetable.classId).select('className');
-  if (!classDoc?.className) return null;
-
-  const normalizedClass = normalizeClassToken(classDoc.className);
-  const normalizedTimetableYear = normalizeAcademicYear(timetable.academicYearId);
-
-  let assignment = await TeacherAssignment.findOne({
-    className: classDoc.className,
-    section: timetable.sectionId,
-    subjectId,
-    academicYear: timetable.academicYearId,
-    isActive: true
-  }).select('teacherId');
-
-  if (!assignment) {
-    assignment = await TeacherAssignment.findOne({
-      className: classDoc.className,
-      section: timetable.sectionId,
-      subjectId,
-      isActive: true
-    })
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .select('teacherId');
-  }
-
-  if (!assignment) {
-    const candidates = await TeacherAssignment.find({
-      section: timetable.sectionId,
-      subjectId,
-      isActive: true
-    })
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .select('teacherId className academicYear');
-
-    const classMatched = candidates.filter((candidate) => {
-      return normalizeClassToken(candidate.className) === normalizedClass;
-    });
-
-    const yearMatched = classMatched.find((candidate) => {
-      return normalizeAcademicYear(candidate.academicYear) === normalizedTimetableYear;
-    });
-
-    assignment = yearMatched || classMatched[0] || null;
-  }
-
-  if (!assignment?.teacherId) return null;
-
-  return await resolveTeacherUserId(assignment.teacherId);
+  // TeacherAssignment model removed - no longer resolves automatically
+  return null;
 }
 
 /**
@@ -143,7 +94,7 @@ export const getTimetable = asyncHandler(async (req, res) => {
       if (normalizedTeacherId && String(normalizedTeacherId) !== String(slot.teacherId)) {
         await TimetableSlot.findByIdAndUpdate(slot._id, {
           teacherId: normalizedTeacherId,
-          lastModifiedBy: req.user._id
+          lastModifiedBy: req.user?._id
         });
       }
       continue;
@@ -158,7 +109,7 @@ export const getTimetable = asyncHandler(async (req, res) => {
       if (resolvedTeacherId) {
         await TimetableSlot.findByIdAndUpdate(slot._id, {
           teacherId: resolvedTeacherId,
-          lastModifiedBy: req.user._id
+          lastModifiedBy: req.user?._id
         });
       }
     }
@@ -547,17 +498,26 @@ export const getTeacherTimetable = asyncHandler(async (req, res) => {
 export const getConflicts = asyncHandler(async (req, res) => {
   const { academicYearId, classId, teacherId } = req.query;
 
-  const conflicts = await conflictDetectionService.getAllConflicts({
-    academicYearId,
-    classId,
-    teacherId
-  });
+  try {
+    const conflicts = await conflictDetectionService.getAllConflicts({
+      academicYearId,
+      classId,
+      teacherId
+    });
 
-  res.json({
-    success: true,
-    data: conflicts,
-    count: conflicts.length
-  });
+    res.json({
+      success: true,
+      data: conflicts || [],
+      count: conflicts?.length || 0
+    });
+  } catch (error) {
+    console.error('Error fetching conflicts:', error.message);
+    res.json({
+      success: true,
+      data: [],
+      count: 0
+    });
+  }
 });
 
 /**
@@ -659,26 +619,40 @@ export const getAllTimetables = asyncHandler(async (req, res) => {
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
 
-  const [timetables, total] = await Promise.all([
-    Timetable.find(query)
-      .populate('classId', 'className')
-      .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit)),
-    Timetable.countDocuments(query)
-  ]);
+  try {
+    const [timetables, total] = await Promise.all([
+      Timetable.find(query)
+        .populate('classId', 'className')
+        .populate('createdBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Timetable.countDocuments(query)
+    ]);
 
-  res.json({
-    success: true,
-    data: timetables,
-    pagination: {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      total,
-      pages: Math.ceil(total / parseInt(limit))
-    }
-  });
+    res.json({
+      success: true,
+      data: timetables || [],
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)) || 1
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching timetables:', error.message);
+    res.json({
+      success: true,
+      data: [],
+      pagination: {
+        page: 1,
+        limit: parseInt(limit),
+        total: 0,
+        pages: 1
+      }
+    });
+  }
 });
 
 /**
@@ -828,13 +802,23 @@ export const checkSlotConflicts = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const getAllClasses = asyncHandler(async (req, res) => {
-  const classes = await Class.find({}).sort({ className: 1 });
+  try {
+    const classes = await Class.find({}).sort({ className: 1 });
 
-  res.json({
-    success: true,
-    count: classes.length,
-    data: classes
-  });
+    res.json({
+      success: true,
+      count: classes.length,
+      data: classes || []
+    });
+  } catch (error) {
+    console.error('Error fetching classes:', error.message);
+    res.json({
+      success: true,
+      count: 0,
+      data: [],
+      message: 'No classes found. Please add classes first.'
+    });
+  }
 });
 
 export default {

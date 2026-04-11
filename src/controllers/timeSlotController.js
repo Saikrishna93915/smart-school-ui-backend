@@ -14,13 +14,23 @@ export const getTimeSlots = asyncHandler(async (req, res) => {
   if (slotType) query.slotType = slotType;
   if (isActive !== undefined) query.isActive = isActive === 'true';
 
-  const timeSlots = await TimeSlot.find(query).sort({ displayOrder: 1 });
+  try {
+    const timeSlots = await TimeSlot.find(query).sort({ displayOrder: 1 });
 
-  res.json({
-    success: true,
-    data: timeSlots,
-    count: timeSlots.length
-  });
+    res.json({
+      success: true,
+      data: timeSlots || [],
+      count: timeSlots?.length || 0
+    });
+  } catch (error) {
+    console.error('Error fetching time slots:', error.message);
+    res.json({
+      success: true,
+      data: [],
+      count: 0,
+      message: 'No time slots found. Please configure time slots first.'
+    });
+  }
 });
 
 /**

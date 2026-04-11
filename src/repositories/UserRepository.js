@@ -1,4 +1,4 @@
-import User from '../models/user.js'; // Assuming the User model exports correctly
+import User from '../models/User.js'; // Assuming the User model exports correctly
 
 /**
  * Creates a new user entry in the database.

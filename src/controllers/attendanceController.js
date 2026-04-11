@@ -185,6 +185,135 @@ export const getWorkingDaysCount = async (req, res) => {
 };
 
 /* =========================================================
+   GET CLASS-WISE ATTENDANCE PERCENTAGE
+   Route: GET /api/admin/attendance/class-wise
+========================================================= */
+export const getClassWiseAttendance = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const presentValues = ["present", "true", true];
+
+    // Use provided dates or default to last 30 days
+    let start, end;
+    if (endDate) {
+      end = new Date(endDate);
+      end.setUTCHours(23, 59, 59, 999);
+    } else {
+      end = new Date();
+      end.setUTCHours(23, 59, 59, 999);
+    }
+
+    if (startDate) {
+      start = new Date(startDate);
+      start.setUTCHours(0, 0, 0, 0);
+    } else {
+      start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - 30);
+      start.setUTCHours(0, 0, 0, 0);
+    }
+
+    // Aggregate attendance by class
+    const attendanceStats = await Attendance.aggregate([
+      {
+        $match: {
+          date: { $gte: start, $lte: end }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            className: "$className",
+            section: "$section"
+          },
+          totalSessions: {
+            $sum: {
+              $add: [
+                { $cond: [{ $in: ["$sessions.morning", presentValues] }, 1, 0] },
+                { $cond: [{ $in: ["$sessions.afternoon", presentValues] }, 1, 0] }
+              ]
+            }
+          },
+          presentSessions: {
+            $sum: {
+              $add: [
+                { $cond: [{ $eq: ["$sessions.morning", "present"] }, 1, 0] },
+                { $cond: [{ $eq: ["$sessions.afternoon", "present"] }, 1, 0] }
+              ]
+            }
+          },
+          totalStudents: { $addToSet: "$studentId" }
+        }
+      },
+      {
+        $project: {
+          className: "$_id.className",
+          section: "$_id.section",
+          totalSessions: 1,
+          presentSessions: 1,
+          totalStudents: { $size: "$totalStudents" },
+          attendancePercentage: {
+            $cond: [
+              { $gt: ["$totalSessions", 0] },
+              { $round: [{ $multiply: [{ $divide: ["$presentSessions", "$totalSessions"] }, 100] }, 1] },
+              0
+            ]
+          }
+        }
+      },
+      { $sort: { className: 1, section: 1 } }
+    ]);
+
+    // Get total student count per class from Student model
+    const studentCounts = await Student.aggregate([
+      { $match: { status: { $in: ["active", "inactive"] }, "class.className": { $ne: null } } },
+      {
+        $group: {
+          _id: {
+            className: "$class.className",
+            section: "$class.section"
+          },
+          totalEnrolled: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const studentMap = {};
+    studentCounts.forEach(sc => {
+      const key = `${sc._id.className}-${sc._id.section}`;
+      studentMap[key] = sc.totalEnrolled;
+    });
+
+    const result = attendanceStats.map(stat => ({
+      className: stat.className,
+      section: stat.section,
+      attendancePercentage: stat.attendancePercentage,
+      presentSessions: stat.presentSessions,
+      totalSessions: stat.totalSessions,
+      totalEnrolled: studentMap[`${stat.className}-${stat.section}`] || stat.totalStudents
+    }));
+
+    // Compute overall stats
+    const overallPresent = result.reduce((sum, r) => sum + r.presentSessions, 0);
+    const overallTotal = result.reduce((sum, r) => sum + r.totalSessions, 0);
+    const overallPercentage = overallTotal > 0 ? ((overallPresent / overallTotal) * 100).toFixed(1) : 0;
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      summary: {
+        totalClasses: result.length,
+        overallAttendancePercentage: Number(overallPercentage),
+        startDate: start.toISOString().split('T')[0],
+        endDate: end.toISOString().split('T')[0]
+      }
+    });
+  } catch (error) {
+    console.error("❌ Class-wise Attendance Failed:", error);
+    res.status(500).json({ message: "Failed to fetch class-wise attendance.", error: error.message });
+  }
+};
+
+/* =========================================================
    GET ATTENDANCE SUMMARY
    Route: GET /api/admin/attendance/summary
 ========================================================= */

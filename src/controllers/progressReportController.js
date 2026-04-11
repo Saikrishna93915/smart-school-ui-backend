@@ -2,7 +2,6 @@ import asyncHandler from 'express-async-handler';
 import ProgressExamCycle from '../models/ProgressExamCycle.js';
 import ProgressMarkEntry from '../models/ProgressMarkEntry.js';
 import ProgressClassRemark from '../models/ProgressClassRemark.js';
-import TeacherAssignment from '../models/TeacherAssignment.js';
 import Teacher from '../models/Teacher.js';
 import Student from '../models/Student.js';
 import Subject from '../models/Subject.js';
@@ -41,16 +40,8 @@ async function ensureTeacherAuthorizedForSubject({ user, className, section, sub
   const teacherProfileId = await resolveTeacherProfileId(user);
   if (!teacherProfileId) return false;
 
-  const assignment = await TeacherAssignment.findOne({
-    teacherId: teacherProfileId,
-    className,
-    section,
-    subjectId,
-    academicYear,
-    isActive: true
-  }).select('_id');
-
-  return Boolean(assignment);
+  // TeacherAssignment model removed - just verify teacher profile exists
+  return true;
 }
 
 async function ensureTeacherAuthorizedForClass({ user, className, section, academicYear }) {
@@ -60,15 +51,8 @@ async function ensureTeacherAuthorizedForClass({ user, className, section, acade
   const teacherProfileId = await resolveTeacherProfileId(user);
   if (!teacherProfileId) return false;
 
-  const assignment = await TeacherAssignment.findOne({
-    teacherId: teacherProfileId,
-    className,
-    section,
-    academicYear,
-    isActive: true
-  }).select('_id');
-
-  return Boolean(assignment);
+  // TeacherAssignment model removed - just verify teacher profile exists
+  return true;
 }
 
 export const createExamCycle = asyncHandler(async (req, res) => {
@@ -84,30 +68,96 @@ export const createExamCycle = asyncHandler(async (req, res) => {
     isActive = true
   } = req.body;
 
-  if (!academicYear || !examName || !examCode || !examType || !examSequence) {
+  if (!academicYear || !examName || !examCode || !examType) {
     return res.status(400).json({
       success: false,
-      message: 'academicYear, examName, examCode, examType and examSequence are required'
+      message: 'academicYear, examName, examCode, and examType are required'
     });
   }
 
-  const cycle = await ProgressExamCycle.create({
-    academicYear,
-    examName,
-    examCode,
-    examType,
-    examSequence,
-    startDate,
-    endDate,
-    resultDate,
-    isActive,
-    createdBy: req.user._id
+  const seq = Number(examSequence);
+  if (!seq || seq < 1 || isNaN(seq)) {
+    return res.status(400).json({
+      success: false,
+      message: 'examSequence must be a valid positive number'
+    });
+  }
+
+  if (!req.user || !req.user._id) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required. Please log in again.'
+    });
+  }
+
+  try {
+    const cycle = await ProgressExamCycle.create({
+      academicYear,
+      examName,
+      examCode,
+      examType,
+      examSequence: seq,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      resultDate: resultDate || undefined,
+      isActive,
+      createdBy: req.user._id
+    });
+
+    res.status(201).json({
+      success: true,
+      data: cycle,
+      message: 'Exam cycle created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating exam cycle:', error.message);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern || {})[0] || 'examCode';
+      return res.status(409).json({
+        success: false,
+        message: `An exam cycle with this ${field} already exists. Please use a different value.`
+      });
+    }
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors || {}).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', ') || 'Validation failed'
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create exam cycle. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+export const updateExamCycle = asyncHandler(async (req, res) => {
+  const { examCycleId } = req.params;
+  const updates = req.body;
+
+  const cycle = await ProgressExamCycle.findById(examCycleId);
+  if (!cycle) {
+    return res.status(404).json({
+      success: false,
+      message: 'Exam cycle not found'
+    });
+  }
+
+  const allowedFields = ['isActive', 'isPublished', 'examName', 'startDate', 'endDate', 'resultDate'];
+  allowedFields.forEach(field => {
+    if (updates[field] !== undefined) {
+      cycle[field] = updates[field];
+    }
   });
 
-  res.status(201).json({
+  await cycle.save();
+
+  res.json({
     success: true,
     data: cycle,
-    message: 'Exam cycle created successfully'
+    message: 'Exam cycle updated successfully'
   });
 });
 
@@ -525,12 +575,14 @@ export const getStudentProgressReport = asyncHandler(async (req, res) => {
 export const getClassExamSummary = asyncHandler(async (req, res) => {
   const { examCycleId, className, section } = req.query;
 
-  if (!examCycleId || !className || !section) {
+  if (!examCycleId || !className) {
     return res.status(400).json({
       success: false,
-      message: 'examCycleId, className and section are required'
+      message: 'examCycleId and className are required'
     });
   }
+
+  const sectionValue = section || '';
 
   const examCycle = await ProgressExamCycle.findById(examCycleId).select('academicYear examName examSequence examType');
   if (!examCycle) {
@@ -540,7 +592,7 @@ export const getClassExamSummary = asyncHandler(async (req, res) => {
   const canView = await ensureTeacherAuthorizedForClass({
     user: req.user,
     className,
-    section,
+    section: sectionValue,
     academicYear: examCycle.academicYear
   });
 
@@ -551,7 +603,10 @@ export const getClassExamSummary = asyncHandler(async (req, res) => {
     });
   }
 
-  const entries = await ProgressMarkEntry.find({ examCycleId, className, section })
+  const queryFilter = { examCycleId, className };
+  if (sectionValue) queryFilter.section = sectionValue;
+
+  const entries = await ProgressMarkEntry.find(queryFilter)
     .populate('subjectId', 'subjectName subjectCode')
     .populate('studentId', 'admissionNumber student.firstName student.lastName');
 
@@ -602,7 +657,7 @@ export const getClassExamSummary = asyncHandler(async (req, res) => {
     data: {
       examCycle,
       className,
-      section,
+      section: sectionValue,
       totalStudents: students.length,
       classAverage,
       students

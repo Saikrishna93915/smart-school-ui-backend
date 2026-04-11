@@ -37,7 +37,6 @@ import userManagementRoutes from "./routes/userManagementRoutes.js"; // ADDED US
 // ==================== NEW ACADEMIC MODULE ROUTES ====================
 import subjectRoutes from "./routes/subjectRoutes.js"; // NEW: Subject Management
 import syllabusRoutes from "./routes/syllabusRoutes.js"; // NEW: Syllabus Management
-import teacherAssignmentRoutes from "./routes/teacherAssignmentRoutes.js"; // NEW: Teacher Assignments
 import diagnoseRoutes from "./routes/diagnoseRoutes.js"; // NEW: Diagnostics (troubleshooting)
 import certificateRoutes from "./routes/certificateRoutes.js"; // NEW: Certificate Management
 
@@ -270,7 +269,6 @@ app.use("/api/transport", transportRoutes);
 // ==================== ACADEMIC MODULE ROUTES (NEW) ====================
 app.use("/api/subjects", subjectRoutes); // Subject CRUD
 app.use("/api/syllabus", syllabusRoutes); // Syllabus management
-app.use("/api/teacher-assignments", teacherAssignmentRoutes); // Teacher-Subject assignments
 app.use("/api/certificates", certificateRoutes); // Certificate management
 
 // ==================== TEACHER MODULE ROUTES ====================
@@ -306,7 +304,7 @@ app.use('/api/progress-reports', progressReportRoutes);
 // ==================== NEW ROLE PORTAL ROUTES ====================
 app.use("/api/principal", principalRoutes); // Principal read-only overview
 app.use("/api/cashier", cashierRoutes);     // Cashier fee collection
-app.use("/api/cashier", cashierStatementRoutes); // Cashier transaction history & statement
+app.use("/api/cashier", cashierStatementRoutes); // Cashier transaction history & statement (all routes prefixed with /statement)
 app.use("/api/cashier/follow-ups", feeFollowUpRoutes); // Fee follow-up & bulk emails
 app.use("/api/driver", driverRoutes);       // Driver trip management
 

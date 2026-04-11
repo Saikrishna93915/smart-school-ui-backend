@@ -1,11 +1,12 @@
 import express from 'express';
-import { 
-    markAttendance, 
-    getAttendanceByClass, 
+import {
+    markAttendance,
+    getAttendanceByClass,
     getAttendanceSummary,
+    getClassWiseAttendance,
     markHoliday,
     getHolidayStatus,
-    getWorkingDaysCount 
+    getWorkingDaysCount
 } from '../controllers/attendanceController.js';
 import { generateAttendanceReport } from '../controllers/attendanceReportController.js';
 
@@ -30,6 +31,10 @@ router.get('/by-class', protect, authorize('admin', 'owner', 'teacher'), getAtte
 // Route: GET /api/admin/attendance/summary
 // Fetches daily statistics (Present, Absent, Half-Day) for the dashboard
 router.get('/summary', protect, authorize('admin', 'owner', 'teacher'), getAttendanceSummary);
+
+// Route: GET /api/admin/attendance/class-wise
+// Fetches class-wise attendance percentage for admin overview
+router.get('/class-wise', protect, authorize('admin', 'owner'), getClassWiseAttendance);
 
 
 /**

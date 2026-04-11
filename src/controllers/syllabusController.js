@@ -1,7 +1,6 @@
 import Syllabus from "../models/Syllabus.js";
 import Subject from "../models/Subject.js";
 import Student from "../models/Student.js";
-import TeacherAssignment from "../models/TeacherAssignment.js";
 import Teacher from "../models/Teacher.js";
 
 /**
@@ -22,22 +21,13 @@ export const createSyllabus = async (req, res) => {
       });
     }
 
-    // If teacher is creating, verify they're assigned to this class-section-subject
+    // If teacher is creating, they must have teacher role
     if (req.user.role === "teacher") {
       const teacher = await Teacher.findOne({ user: req.user._id });
-      const assignment = await TeacherAssignment.findOne({
-        teacherId: teacher._id,
-        className,
-        section,
-        subjectId,
-        academicYear: academicYear || "2025-2026",
-        isActive: true
-      });
-
-      if (!assignment) {
+      if (!teacher) {
         return res.status(403).json({
           success: false,
-          message: "You are not assigned to teach this subject for this class"
+          message: "You are not registered as a teacher"
         });
       }
     }
@@ -136,22 +126,13 @@ export const getAllSyllabus = async (req, res) => {
         filter.academicYear = student.class.academicYear || "2025-2026";
       }
     } else if (req.user.role === "teacher") {
-      // Teachers can only see their assigned classes
+      // Teachers can see all syllabuses (assignment-based filtering removed)
       const teacher = await Teacher.findOne({ user: req.user._id });
-      const assignments = await TeacherAssignment.find({
-        teacherId: teacher._id,
-        isActive: true
-      });
-      
-      // Build OR condition for teacher's classes
-      const teacherClasses = assignments.map(a => ({
-        className: a.className,
-        section: a.section,
-        subjectId: a.subjectId
-      }));
-      
-      if (teacherClasses.length > 0) {
-        filter.$or = teacherClasses;
+      if (!teacher) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not registered as a teacher"
+        });
       }
     }
 
@@ -412,18 +393,10 @@ export const updateSyllabus = async (req, res) => {
       });
     }
 
-    // If teacher is updating, verify they're assigned
+    // If teacher is updating, verify they exist as a teacher
     if (req.user.role === "teacher") {
       const teacher = await Teacher.findOne({ user: req.user._id });
-      const assignment = await TeacherAssignment.findOne({
-        teacherId: teacher._id,
-        className: syllabus.className,
-        section: syllabus.section,
-        subjectId: syllabus.subjectId,
-        isActive: true
-      });
-
-      if (!assignment) {
+      if (!teacher) {
         return res.status(403).json({
           success: false,
           message: "You are not authorized to update this syllabus"
@@ -478,21 +451,13 @@ export const updateChapterStatus = async (req, res) => {
       });
     }
 
-    // If teacher is updating, verify they're assigned
+    // If teacher is updating, verify they exist as a teacher
     if (req.user.role === "teacher") {
       const teacher = await Teacher.findOne({ user: req.user._id });
-      const assignment = await TeacherAssignment.findOne({
-        teacherId: teacher._id,
-        className: syllabus.className,
-        section: syllabus.section,
-        subjectId: syllabus.subjectId,
-        isActive: true
-      });
-
-      if (!assignment) {
+      if (!teacher) {
         return res.status(403).json({
           success: false,
-          message: "You are not authorized to update this chapter"
+          message: "You are not authorized"
         });
       }
     }
@@ -560,15 +525,7 @@ export const addChapter = async (req, res) => {
     // Verify teacher authorization
     if (req.user.role === "teacher") {
       const teacher = await Teacher.findOne({ user: req.user._id });
-      const assignment = await TeacherAssignment.findOne({
-        teacherId: teacher._id,
-        className: syllabus.className,
-        section: syllabus.section,
-        subjectId: syllabus.subjectId,
-        isActive: true
-      });
-
-      if (!assignment) {
+      if (!teacher) {
         return res.status(403).json({
           success: false,
           message: "You are not authorized to add chapters to this syllabus"
@@ -620,15 +577,7 @@ export const deleteChapter = async (req, res) => {
     // Verify teacher authorization
     if (req.user.role === "teacher") {
       const teacher = await Teacher.findOne({ user: req.user._id });
-      const assignment = await TeacherAssignment.findOne({
-        teacherId: teacher._id,
-        className: syllabus.className,
-        section: syllabus.section,
-        subjectId: syllabus.subjectId,
-        isActive: true
-      });
-
-      if (!assignment) {
+      if (!teacher) {
         return res.status(403).json({
           success: false,
           message: "You are not authorized to delete chapters from this syllabus"

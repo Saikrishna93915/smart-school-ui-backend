@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   createExamCycle,
+  updateExamCycle,
   getExamCycles,
   upsertStudentMarks,
   verifyMarksForClass,
@@ -16,6 +17,7 @@ const router = express.Router();
 router.use(protect);
 
 router.post('/exam-cycles', authorize('admin', 'owner'), createExamCycle);
+router.put('/exam-cycles/:examCycleId', authorize('admin', 'owner'), updateExamCycle);
 router.get('/exam-cycles', authorize('admin', 'owner', 'teacher'), getExamCycles);
 
 router.post('/marks/upsert', authorize('admin', 'owner', 'teacher'), upsertStudentMarks);

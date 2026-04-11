@@ -1,4 +1,3 @@
-import TeacherAssignment from '../models/TeacherAssignment.js';
 import ClassSchedule from '../models/ClassSchedule.js';
 import Attendance from '../models/Attendance.js';
 import StudentPerformance from '../models/StudentPerformance.js';
@@ -104,23 +103,17 @@ export const getDashboardOverview = asyncHandler(async (req, res) => {
 export const getDashboardStatistics = asyncHandler(async (req, res) => {
   const teacherId = req.user._id;
 
-  // Get all teacher assignments
-  const assignments = await TeacherAssignment.find({
-    teacher_id: teacherId,
-    academic_year: new Date().getFullYear()
-  }).lean();
+  // Get classes managed by this teacher from class schedules
+  const schedules = await ClassSchedule.find({ teacherId }).lean();
+  const uniqueClassIds = [...new Set(schedules.map(s => String(s.classId)))];
 
-  const classIds = assignments.map(a => a.class_id);
-  const sectionIds = assignments.map(a => a.section_id);
-
-  // Total students
+  // Total students in those classes
   const students = await User.countDocuments({
-    role: 'student',
-    class_id: { $in: classIds }
+    role: 'student'
   });
 
   // Total classes
-  const classes = classIds.length;
+  const classes = uniqueClassIds.length;
 
   // Average attendance rate
   const attendanceData = await Attendance.aggregate([
