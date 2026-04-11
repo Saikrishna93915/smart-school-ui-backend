@@ -37,6 +37,7 @@ import userManagementRoutes from "./routes/userManagementRoutes.js"; // ADDED US
 // ==================== NEW ACADEMIC MODULE ROUTES ====================
 import subjectRoutes from "./routes/subjectRoutes.js"; // NEW: Subject Management
 import syllabusRoutes from "./routes/syllabusRoutes.js"; // NEW: Syllabus Management
+import gradeScaleRoutes from "./routes/gradeScaleRoutes.js"; // Grade Scale Management
 import diagnoseRoutes from "./routes/diagnoseRoutes.js"; // NEW: Diagnostics (troubleshooting)
 import certificateRoutes from "./routes/certificateRoutes.js"; // NEW: Certificate Management
 
@@ -269,6 +270,7 @@ app.use("/api/transport", transportRoutes);
 // ==================== ACADEMIC MODULE ROUTES (NEW) ====================
 app.use("/api/subjects", subjectRoutes); // Subject CRUD
 app.use("/api/syllabus", syllabusRoutes); // Syllabus management
+app.use("/api/grade-scales", gradeScaleRoutes); // Grade Scale Management
 app.use("/api/certificates", certificateRoutes); // Certificate management
 
 // ==================== TEACHER MODULE ROUTES ====================
