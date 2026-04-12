@@ -83,13 +83,14 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
     return sum + due;
   }, 0);
 
-  // Build children summary
+  // Build children summary with performance
   const childrenSummary = children.map(child => {
     const attendance = todayAttendance.find(a => String(a.studentId) === String(child._id));
     const fees = feeData.find(f => String(f.studentId) === String(child._id));
     const totalFee = fees?.totalFee || 0;
     const totalPaid = fees?.totalPaid || 0;
     const due = Math.max(0, totalFee - totalPaid - (fees?.discountApplied || 0));
+    const perf = childPerformanceMap[String(child._id)] || { latestExam: null, overallPercentage: 0, examsTaken: 0 };
 
     return {
       id: child._id,
@@ -102,9 +103,61 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
         afternoon: attendance.sessions?.afternoon || 'not_marked'
       } : null,
       feesDue: due,
-      totalFee
+      totalFee,
+      performance: perf
     };
   });
+
+  // Get performance data for each child (latest exam results)
+  const performanceData = await ProgressMarkEntry.aggregate([
+    { $match: { studentId: { $in: childIds.map(String) } } },
+    { $group: {
+      _id: { studentId: '$studentId', examCycleId: '$examCycleId' },
+      totalObtained: { $sum: '$totalMarks' },
+      totalMax: { $sum: '$maxMarks' },
+      subjectCount: { $sum: 1 }
+    }},
+    { $sort: { '_id.examCycleId': -1 } }
+  ]);
+
+  // Get published exam cycle names
+  const examCycleIds = [...new Set(performanceData.map(p => p._id.examCycleId))];
+  const examCycles = await ProgressExamCycle.find({ _id: { $in: examCycleIds } })
+    .select('_id examName examType')
+    .lean();
+  const examMap = {};
+  examCycles.forEach(e => { examMap[String(e._id)] = e; });
+
+  // Build performance summary per child
+  const childPerformanceMap = {};
+  for (const perf of performanceData) {
+    const studentId = String(perf._id.studentId);
+    if (!childPerformanceMap[studentId]) {
+      childPerformanceMap[studentId] = { latestExam: null, overallPercentage: 0, examsTaken: 0 };
+    }
+    const exam = examMap[String(perf._id.examCycleId)];
+    const pct = perf.totalMax > 0 ? ((perf.totalObtained / perf.totalMax) * 100).toFixed(1) : 0;
+
+    if (!childPerformanceMap[studentId].latestExam) {
+      childPerformanceMap[studentId].latestExam = {
+        name: exam?.examName || 'Unknown',
+        type: exam?.examType || '',
+        percentage: parseFloat(pct),
+        totalObtained: perf.totalObtained,
+        totalMax: perf.totalMax,
+        subjects: perf.subjectCount
+      };
+      childPerformanceMap[studentId].examsTaken++;
+    } else {
+      childPerformanceMap[studentId].examsTaken++;
+      // Calculate overall average
+      const prev = childPerformanceMap[studentId];
+      const newPct = parseFloat(pct);
+      prev.overallPercentage = prev.latestExam
+        ? ((prev.latestExam.percentage + newPct) / 2).toFixed(1)
+        : pct;
+    }
+  }
 
   // Calculate average attendance for the month
   const monthStart = new Date(today.getUTCFullYear(), today.getUTCMonth(), 1);
