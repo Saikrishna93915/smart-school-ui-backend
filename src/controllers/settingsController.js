@@ -10,7 +10,8 @@ import {
   validateSchoolProfile,
   validateAcademicSettings,
   validateSecuritySettings,
-  validateNotificationSettings
+  validateNotificationSettings,
+  validateAdvancedSettings
 } from '../validators/settingsValidator.js';
 
 // ==================== GET ALL SETTINGS ====================
@@ -133,6 +134,13 @@ export const updateBillingSettings = asyncHandler(async (req, res) => {
 
 export const updateAdvancedSettings = asyncHandler(async (req, res) => {
   const schoolId = req.user?.schoolId || null;
+
+  const validation = validateAdvancedSettings(req.body);
+  if (!validation.isValid) {
+    return res.status(400).json(
+      ApiResponse.badRequest('Validation failed', validation.errors)
+    );
+  }
   
   const updated = await settingsService.updateAdvancedSettings(req.body, schoolId);
   

@@ -3,6 +3,7 @@ import ProgressExamCycle from '../models/ProgressExamCycle.js';
 import ProgressMarkEntry from '../models/ProgressMarkEntry.js';
 import ProgressClassRemark from '../models/ProgressClassRemark.js';
 import Teacher from '../models/Teacher.js';
+import Class from '../models/Class.js';
 import Student from '../models/Student.js';
 import Subject from '../models/Subject.js';
 

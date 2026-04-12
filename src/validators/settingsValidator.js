@@ -162,9 +162,55 @@ const validateNotificationSettings = (data) => {
   };
 };
 
+const validateAdvancedSettings = (data) => {
+  const errors = [];
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    errors.push({ field: 'advanced', message: 'Advanced settings must be an object' });
+    return { isValid: false, errors };
+  }
+
+  if (data.layout) {
+    const { layout } = data;
+
+    if (layout.navigationMode && !['sidebar', 'cards', 'hybrid'].includes(layout.navigationMode)) {
+      errors.push({ field: 'layout.navigationMode', message: 'Invalid navigation mode' });
+    }
+
+    if (layout.mobileNavigation && !['bottom-nav', 'cards', 'compact-menu'].includes(layout.mobileNavigation)) {
+      errors.push({ field: 'layout.mobileNavigation', message: 'Invalid mobile navigation mode' });
+    }
+
+    if (layout.showSidebar !== undefined && typeof layout.showSidebar !== 'boolean') {
+      errors.push({ field: 'layout.showSidebar', message: 'showSidebar must be a boolean' });
+    }
+
+    if (layout.showDashboardCards !== undefined && typeof layout.showDashboardCards !== 'boolean') {
+      errors.push({ field: 'layout.showDashboardCards', message: 'showDashboardCards must be a boolean' });
+    }
+
+    if (layout.featuredModules !== undefined) {
+      if (!Array.isArray(layout.featuredModules)) {
+        errors.push({ field: 'layout.featuredModules', message: 'featuredModules must be an array' });
+      } else {
+        const invalidModules = layout.featuredModules.filter((module) => typeof module !== 'string' || !module.trim());
+        if (invalidModules.length > 0) {
+          errors.push({ field: 'layout.featuredModules', message: 'featuredModules must contain valid module keys' });
+        }
+      }
+    }
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+};
+
 export {
   validateSchoolProfile,
   validateAcademicSettings,
   validateSecuritySettings,
-  validateNotificationSettings
+  validateNotificationSettings,
+  validateAdvancedSettings
 };
