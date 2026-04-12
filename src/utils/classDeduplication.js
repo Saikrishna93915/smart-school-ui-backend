@@ -7,7 +7,6 @@ import Student from "../models/Student.js";
 import StudentPerformance from "../models/StudentPerformance.js";
 import StudyMaterial from "../models/StudyMaterial.js";
 import Subject from "../models/Subject.js";
-import TeacherAssignment from "../models/TeacherAssignment.js";
 import TeacherLesson from "../models/TeacherLesson.js";
 import TeacherPermission from "../models/TeacherPermission.js";
 import Timetable from "../models/Timetable.js";
@@ -294,139 +293,9 @@ const mergeTimetableReferences = async (duplicateId, primaryClass) => {
   return { movedCount, deletedCount };
 };
 
-const pickPrimaryTeacherAssignment = (assignments, primaryClassId) => {
-  return [...assignments].sort((left, right) => {
-    const leftPrimary = String(left.class || "") === String(primaryClassId) ? 1 : 0;
-    const rightPrimary = String(right.class || "") === String(primaryClassId) ? 1 : 0;
-    if (leftPrimary !== rightPrimary) {
-      return rightPrimary - leftPrimary;
-    }
-
-    const leftActive = left.status === "active" ? 1 : 0;
-    const rightActive = right.status === "active" ? 1 : 0;
-    if (leftActive !== rightActive) {
-      return rightActive - leftActive;
-    }
-
-    const leftUpdatedAt = new Date(left.updatedAt || 0).getTime();
-    const rightUpdatedAt = new Date(right.updatedAt || 0).getTime();
-    return rightUpdatedAt - leftUpdatedAt;
-  })[0];
-};
-
+// TeacherAssignment model removed - no-op stubs
 const mergeTeacherAssignmentsForGroup = async (primaryClass, groupClasses) => {
-  const originalNames = Array.from(
-    new Set(
-      groupClasses
-        .map((classDoc) => String(classDoc.name || "").trim())
-        .filter(Boolean)
-    )
-  );
-
-  const classIds = groupClasses.map((classDoc) => classDoc._id);
-  const assignmentFilter = {
-    academicYear: primaryClass.academicYear,
-    $or: [
-      { class: { $in: classIds } },
-      { className: { $in: originalNames } },
-    ],
-  };
-
-  if (primaryClass.section) {
-    assignmentFilter.$or.push({
-      className: primaryClass.name,
-      section: primaryClass.section,
-      academicYear: primaryClass.academicYear,
-    });
-  }
-
-  const assignments = await TeacherAssignment.find(assignmentFilter).lean();
-  const groupedAssignments = new Map();
-
-  for (const assignment of assignments) {
-    const assignmentSection = normalizeClassSection(assignment.section);
-    const groupSection = primaryClass.section || null;
-    const belongsToGroup =
-      String(assignment.class || "") === String(primaryClass._id) ||
-      classIds.some((classId) => String(classId) === String(assignment.class || "")) ||
-      originalNames.includes(String(assignment.className || "").trim());
-
-    if (!belongsToGroup) {
-      continue;
-    }
-
-    if (groupSection && assignmentSection && assignmentSection !== groupSection) {
-      continue;
-    }
-
-    const subjectKey = String(assignment.subjectId || assignment.subject || "class-teacher");
-    const key = [
-      primaryClass.academicYear,
-      groupSection || "",
-      subjectKey,
-      assignment.assignmentType || "subject_teacher",
-    ].join("|");
-
-    if (!groupedAssignments.has(key)) {
-      groupedAssignments.set(key, []);
-    }
-
-    groupedAssignments.get(key).push(assignment);
-  }
-
-  let updatedCount = 0;
-  let deletedCount = 0;
-
-  for (const assignmentGroup of groupedAssignments.values()) {
-    const keeper = pickPrimaryTeacherAssignment(assignmentGroup, primaryClass._id);
-    const duplicates = assignmentGroup.filter(
-      (assignment) => String(assignment._id) !== String(keeper._id)
-    );
-
-    await TeacherAssignment.updateOne(
-      { _id: keeper._id },
-      {
-        $set: {
-          class: primaryClass._id,
-          className: primaryClass.name,
-          section: primaryClass.section,
-        },
-      }
-    );
-    updatedCount += 1;
-
-    if (duplicates.length > 0) {
-      await TeacherAssignment.deleteMany({
-        _id: { $in: duplicates.map((assignment) => assignment._id) },
-      });
-      deletedCount += duplicates.length;
-    }
-  }
-
-  const studentFilter = {
-    "class.className": { $in: originalNames },
-    "class.academicYear": primaryClass.academicYear,
-  };
-  if (primaryClass.section) {
-    studentFilter["class.section"] = primaryClass.section;
-  }
-
-  const studentUpdate = { "class.className": primaryClass.name };
-  if (primaryClass.section) {
-    studentUpdate["class.section"] = primaryClass.section;
-  }
-
-  await Student.updateMany(studentFilter, { $set: studentUpdate });
-
-  await Subject.updateMany(
-    {
-      className: { $in: originalNames },
-      academicYear: primaryClass.academicYear,
-    },
-    { $set: { className: primaryClass.name } }
-  );
-
-  return { updatedCount, deletedCount };
+  return { updatedCount: 0, deletedCount: 0 };
 };
 
 export const analyzeClassDuplicates = async () => {
