@@ -14,7 +14,6 @@ import asyncHandler from "../utils/asyncHandler.js";
 import mongoose from "mongoose";
 
 // New modules for Principal
-import TeacherAssignment from "../models/TeacherAssignment.js";
 import Timetable from "../models/Timetable.js";
 import TeacherPermission from "../models/TeacherPermission.js";
 import PermissionTemplate from "../models/PermissionTemplate.js";
@@ -1063,305 +1062,6 @@ export const archiveAnnouncement = asyncHandler(async (req, res) => {
 
 // ==========================================
 // NEW MODULES - Teacher Assignment, Timetable, Permissions, Class Management, Leave Approval
-// ==========================================
-
-// @desc    Get all teacher assignments
-// @route   GET /api/principal/teacher-assignments
-export const getTeacherAssignments = asyncHandler(async (req, res) => {
-  try {
-    const { academicYear, assignmentType, classId, teacherId, status } = req.query;
-    const query = {};
-
-    if (academicYear) query.academicYear = academicYear;
-    if (assignmentType) query.assignmentType = assignmentType;
-    if (classId) query.class = classId;
-    if (teacherId) query.teacher = teacherId;
-    if (status) query.status = status;
-
-    const assignments = await TeacherAssignment.find(query)
-      .populate("teacher", "name personal contact professional email employeeId status")
-      .populate("class", "name section academicYear")
-      .populate("subject", "name code")
-      .lean();
-
-    // Simple transformation - just return the data as-is
-    // Frontend will handle the display
-    res.json({ success: true, data: assignments || [] });
-  } catch (error) {
-    console.error('Error in getTeacherAssignments:', error);
-    res.json({ success: true, data: [] });
-  }
-});
-
-// @desc    Create/update teacher assignment
-// @route   POST /api/principal/teacher-assignments
-export const saveTeacherAssignment = asyncHandler(async (req, res) => {
-  const {
-    teacherId,
-    classId,
-    sectionId,
-    subjectId,
-    academicYear,
-    assignmentType = "subject_teacher",
-    term = "annual",
-    periodsPerWeek = 5,
-    isPrimary = false,
-    notes = "",
-  } = req.body;
-
-  const actor = resolveActorName(req.user);
-
-  const resolvedTeacherId = await resolveTeacherId(teacherId);
-  const resolvedClassId = await resolveClassId(classId, academicYear);
-
-  if (!resolvedTeacherId || !resolvedClassId || !academicYear) {
-    return res.status(400).json({ success: false, message: "teacherId, classId and academicYear are required" });
-  }
-
-  if (assignmentType === "subject_teacher" && !subjectId) {
-    return res.status(400).json({ success: false, message: "subjectId is required for subject teacher assignment" });
-  }
-
-  const resolvedSubjectId = assignmentType === "subject_teacher"
-    ? await resolveSubjectId(subjectId, academicYear)
-    : null;
-
-  if (assignmentType === "subject_teacher" && !resolvedSubjectId) {
-    return res.status(400).json({
-      success: false,
-      message: `Subject '${subjectId}' was not found. Use a valid subject code or subject name from the database.`,
-    });
-  }
-
-  if (assignmentType === "class_teacher") {
-    const cls = await Class.findById(resolvedClassId);
-    if (!cls) {
-      return res.status(404).json({ success: false, message: "Class not found" });
-    }
-
-    const existingTeacherClassRole = await TeacherAssignment.findOne({
-      assignmentType: "class_teacher",
-      teacher: resolvedTeacherId,
-      academicYear,
-      status: "active",
-      class: { $ne: resolvedClassId },
-    });
-
-    if (existingTeacherClassRole) {
-      return res.status(409).json({
-        success: false,
-        message: "This teacher is already assigned as a class teacher for another class in the selected academic year.",
-      });
-    }
-
-    const existingClassTeacher = await TeacherAssignment.findOne({
-      assignmentType: "class_teacher",
-      class: resolvedClassId,
-      academicYear,
-      status: "active",
-    });
-
-    if (existingClassTeacher) {
-      return res.status(409).json({
-        success: false,
-        message: "This class already has an active class teacher for the selected academic year. Use transfer instead.",
-      });
-    }
-
-    applyClassTeacherState(cls, resolvedTeacherId, actor, notes || "Assigned via teacher assignment");
-    cls.updatedBy = actor;
-    await cls.save();
-  }
-
-  const classRecord = await Class.findById(resolvedClassId).select("name className section").lean();
-  const legacyClassName = classRecord?.name || classRecord?.className || null;
-  const legacySection = classRecord?.section || sectionId || null;
-
-  const assignment = await TeacherAssignment.create({
-    assignmentType,
-    teacher: resolvedTeacherId,
-    class: resolvedClassId,
-    className: legacyClassName,
-    section: legacySection,
-    subject: assignmentType === "subject_teacher" ? resolvedSubjectId : null,
-    subjectId: assignmentType === "subject_teacher" ? resolvedSubjectId : null,
-    academicYear,
-    term,
-    periodsPerWeek,
-    isPrimary,
-    status: "active",
-    notes,
-  });
-
-  res.status(201).json({ success: true, data: assignment });
-});
-
-// @desc    Update teacher assignment
-// @route   PUT /api/principal/teacher-assignments/:id
-export const updateTeacherAssignment = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const {
-    teacherId,
-    classId,
-    sectionId,
-    subjectId,
-    academicYear,
-    assignmentType = "subject_teacher",
-    term,
-    periodsPerWeek,
-    isPrimary,
-    status,
-    notes,
-  } = req.body;
-
-  const actor = resolveActorName(req.user);
-  const existingAssignment = await TeacherAssignment.findById(id).lean();
-
-  if (!existingAssignment) {
-    return res.status(404).json({ success: false, message: "Assignment not found" });
-  }
-
-  const resolvedTeacherId = await resolveTeacherId(teacherId);
-  const resolvedClassId = await resolveClassId(classId, academicYear);
-
-  if (!resolvedTeacherId || !resolvedClassId || !academicYear) {
-    return res.status(400).json({ success: false, message: "teacherId, classId and academicYear are required" });
-  }
-
-  if (assignmentType === "subject_teacher" && !subjectId) {
-    return res.status(400).json({ success: false, message: "subjectId is required for subject teacher assignment" });
-  }
-
-  const resolvedSubjectId = assignmentType === "subject_teacher"
-    ? await resolveSubjectId(subjectId, academicYear)
-    : null;
-
-  if (assignmentType === "subject_teacher" && !resolvedSubjectId) {
-    return res.status(400).json({
-      success: false,
-      message: `Subject '${subjectId}' was not found. Use a valid subject code or subject name from the database.`,
-    });
-  }
-
-  if (assignmentType === "class_teacher") {
-    const cls = await Class.findById(resolvedClassId);
-    if (!cls) {
-      return res.status(404).json({ success: false, message: "Class not found" });
-    }
-
-    const existingTeacherClassRole = await TeacherAssignment.findOne({
-      assignmentType: "class_teacher",
-      teacher: resolvedTeacherId,
-      academicYear,
-      status: "active",
-      class: { $ne: resolvedClassId },
-      _id: { $ne: id },
-    });
-
-    if (existingTeacherClassRole) {
-      return res.status(409).json({
-        success: false,
-        message: "This teacher is already assigned as a class teacher for another class in the selected academic year.",
-      });
-    }
-
-    const conflict = await TeacherAssignment.findOne({
-      _id: { $ne: id },
-      assignmentType: "class_teacher",
-      class: resolvedClassId,
-      academicYear,
-      status: "active",
-    });
-
-    if (conflict) {
-      return res.status(409).json({
-        success: false,
-        message: "This class already has an active class teacher for the selected academic year. Use transfer instead.",
-      });
-    }
-
-    applyClassTeacherState(cls, resolvedTeacherId, actor, notes || "Updated via teacher assignment");
-    cls.updatedBy = actor;
-    await cls.save();
-  }
-
-  const classRecord = await Class.findById(resolvedClassId).select("name className section").lean();
-  const legacyClassName = classRecord?.name || classRecord?.className || null;
-  const legacySection = classRecord?.section || sectionId || null;
-
-  const assignment = await TeacherAssignment.findByIdAndUpdate(
-    id,
-    {
-      assignmentType,
-      teacher: resolvedTeacherId,
-      class: resolvedClassId,
-      className: legacyClassName,
-      section: legacySection,
-      subject: assignmentType === "subject_teacher" ? resolvedSubjectId : null,
-      subjectId: assignmentType === "subject_teacher" ? resolvedSubjectId : null,
-      academicYear,
-      term,
-      periodsPerWeek,
-      isPrimary,
-      status,
-      notes,
-    },
-    { new: true, runValidators: true }
-  );
-
-  if (existingAssignment.assignmentType === "class_teacher" && assignmentType !== "class_teacher") {
-    const previousClass = await Class.findById(existingAssignment.class);
-    if (previousClass && String(previousClass.classTeacher || "") === String(existingAssignment.teacher || "")) {
-      applyClassTeacherState(previousClass, null, actor, "Class teacher assignment converted to subject assignment");
-      previousClass.updatedBy = actor;
-      await previousClass.save();
-      await deactivateClassTeacherAssignments({
-        classId: previousClass._id,
-        academicYear: existingAssignment.academicYear,
-        notes: "Converted to subject assignment",
-      });
-    }
-  }
-
-  if (assignmentType === "class_teacher") {
-    const syncedClass = await Class.findById(resolvedClassId);
-    if (syncedClass) {
-      await upsertClassTeacherAssignment({
-        classDoc: syncedClass,
-        teacherId: resolvedTeacherId,
-        academicYear,
-        notes: notes || "Updated via teacher assignment",
-      });
-    }
-  }
-
-  res.json({ success: true, data: assignment });
-});
-
-// @desc    Delete teacher assignment
-// @route   DELETE /api/principal/teacher-assignments/:id
-export const deleteTeacherAssignment = asyncHandler(async (req, res) => {
-  const actor = resolveActorName(req.user);
-  const assignment = await TeacherAssignment.findById(req.params.id);
-
-  if (!assignment) {
-    return res.status(404).json({ success: false, message: "Assignment not found" });
-  }
-
-  if (assignment.assignmentType === "class_teacher") {
-    const cls = await Class.findById(assignment.class);
-    if (cls && String(cls.classTeacher || "") === String(assignment.teacher || "")) {
-      applyClassTeacherState(cls, null, actor, "Class teacher assignment deleted");
-      cls.updatedBy = actor;
-      await cls.save();
-    }
-  }
-
-  await assignment.deleteOne();
-
-  res.json({ success: true, message: "Assignment deleted successfully" });
-});
-
 // @desc    Assign class teacher to class
 // @route   POST /api/principal/class-teacher/assign
 export const assignClassTeacher = asyncHandler(async (req, res) => {
@@ -1380,34 +1080,29 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "Class not found" });
   }
 
-  const existingClassTeacher = await TeacherAssignment.findOne({
-    assignmentType: "class_teacher",
-    class: resolvedClassId,
-    academicYear,
-    status: "active",
-  });
+  const existingClassTeacher = cls.classTeacher || null;
 
-  if (existingClassTeacher) {
+  if (existingClassTeacher && String(existingClassTeacher) === String(resolvedTeacherId)) {
     return res.status(409).json({
       success: false,
-      message: "This class already has an active class teacher for the selected academic year. Use transfer instead.",
+      message: "This teacher is already assigned as class teacher for this class.",
     });
   }
 
-  const teacherConflict = await findTeacherClassConflict({
-    teacherId: resolvedTeacherId,
-    academicYear,
-    excludeClassId: resolvedClassId,
-  });
+  // Check if teacher is already class teacher for another class via Class model
+  const teacherOtherClass = await Class.findOne({
+    classTeacher: resolvedTeacherId,
+    _id: { $ne: resolvedClassId },
+  }).lean();
 
-  if (teacherConflict) {
-    const conflictDisplay = getClassDisplayInfo(teacherConflict.name || "");
+  if (teacherOtherClass) {
+    const conflictDisplay = getClassDisplayInfo(teacherOtherClass.name || teacherOtherClass.className || "");
     return res.status(409).json({
       success: false,
       message:
         `This teacher is already assigned as class teacher for ` +
-        `${conflictDisplay.displayName}${teacherConflict.section ? `-${teacherConflict.section}` : ""} ` +
-        `in ${teacherConflict.academicYear}. One teacher can be class teacher for only one active class at a time.`,
+        `${conflictDisplay.displayName}${teacherOtherClass.section ? `-${teacherOtherClass.section}` : ""}. ` +
+        `One teacher can be class teacher for only one active class at a time.`,
     });
   }
 
@@ -1415,14 +1110,7 @@ export const assignClassTeacher = asyncHandler(async (req, res) => {
   cls.updatedBy = actor;
   await cls.save();
 
-  const assignment = await upsertClassTeacherAssignment({
-    classDoc: cls,
-    teacherId: resolvedTeacherId,
-    academicYear,
-    notes,
-  });
-
-  res.status(201).json({ success: true, data: assignment, message: "Class teacher assigned successfully" });
+  res.status(201).json({ success: true, data: { classId: cls._id, classTeacher: resolvedTeacherId }, message: "Class teacher assigned successfully" });
 });
 
 // @desc    Transfer class teacher
@@ -1444,35 +1132,20 @@ export const transferClassTeacher = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "Class not found" });
   }
 
-  const teacherAlreadyClassTeacher = await TeacherAssignment.findOne({
-    assignmentType: "class_teacher",
-    teacher: resolvedTeacherId,
-    academicYear,
-    status: "active",
-    class: { $ne: resolvedClassId },
-  });
+  // Check if teacher is already class teacher for another class via Class model
+  const teacherOtherClass = await Class.findOne({
+    classTeacher: resolvedTeacherId,
+    _id: { $ne: resolvedClassId },
+  }).lean();
 
-  if (teacherAlreadyClassTeacher) {
-    return res.status(409).json({
-      success: false,
-      message: "This teacher is already assigned as a class teacher for another class in the selected academic year.",
-    });
-  }
-
-  const teacherConflict = await findTeacherClassConflict({
-    teacherId: resolvedTeacherId,
-    academicYear,
-    excludeClassId: resolvedClassId,
-  });
-
-  if (teacherConflict) {
-    const conflictDisplay = getClassDisplayInfo(teacherConflict.name || "");
+  if (teacherOtherClass) {
+    const conflictDisplay = getClassDisplayInfo(teacherOtherClass.name || teacherOtherClass.className || "");
     return res.status(409).json({
       success: false,
       message:
         `This teacher is already assigned as class teacher for ` +
-        `${conflictDisplay.displayName}${teacherConflict.section ? `-${teacherConflict.section}` : ""} ` +
-        `in ${teacherConflict.academicYear}. One teacher can be class teacher for only one active class at a time.`,
+        `${conflictDisplay.displayName}${teacherOtherClass.section ? `-${teacherOtherClass.section}` : ""}. ` +
+        `One teacher can be class teacher for only one active class at a time.`,
     });
   }
 
@@ -1487,14 +1160,7 @@ export const transferClassTeacher = asyncHandler(async (req, res) => {
   cls.updatedBy = actor;
   await cls.save();
 
-  const assignment = await upsertClassTeacherAssignment({
-    classDoc: cls,
-    teacherId: resolvedTeacherId,
-    academicYear,
-    notes: reason ? `Transfer reason: ${reason}` : "Class teacher transfer",
-  });
-
-  res.json({ success: true, data: assignment, message: "Class teacher transferred successfully" });
+  res.json({ success: true, data: { classId: cls._id, classTeacher: resolvedTeacherId }, message: "Class teacher transferred successfully" });
 });
 
 // @desc    Get class teacher by class
@@ -2177,109 +1843,6 @@ const findTeacherClassConflict = async ({ teacherId, academicYear, excludeClassI
   return Class.findOne(query).select("_id name section academicYear").lean();
 };
 
-const syncTeacherAssignmentClassSnapshot = async (classDoc) => {
-  if (!classDoc?._id) return;
-
-  try {
-    const { className, section } = getClassAssignmentSnapshot(classDoc);
-
-    await TeacherAssignment.updateMany(
-      { class: classDoc._id },
-      { $set: { className, section } }
-    );
-  } catch (error) {
-    console.error("Error syncing teacher assignment class snapshot:", error);
-    // Don't throw - this is a secondary operation
-  }
-};
-
-const upsertClassTeacherAssignment = async ({ classDoc, teacherId, academicYear, notes = "" }) => {
-  if (!classDoc?._id || !teacherId || !academicYear) return null;
-
-  const { className, section } = getClassAssignmentSnapshot(classDoc);
-
-  try {
-    return await TeacherAssignment.findOneAndUpdate(
-      {
-        assignmentType: "class_teacher",
-        class: classDoc._id,
-        academicYear,
-      },
-      {
-        $set: {
-          teacher: teacherId,
-          className,
-          section,
-          subject: null,
-          subjectId: null,
-          term: "annual",
-          periodsPerWeek: 0,
-          isPrimary: true,
-          status: "active",
-          notes,
-        },
-        $setOnInsert: {
-          assignmentType: "class_teacher",
-          class: classDoc._id,
-          academicYear,
-        },
-      },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-        setDefaultsOnInsert: true,
-      }
-    );
-  } catch (error) {
-    if (error?.code === 11000) {
-      console.warn(
-        `Duplicate teacher assignment detected for ${className}-${section} (${academicYear}). ` +
-        `Teacher is already assigned to this class. Updating existing record instead.`
-      );
-      
-      // If duplicate, just update the existing record
-      return await TeacherAssignment.findOneAndUpdate(
-        {
-          assignmentType: "class_teacher",
-          className,
-          section,
-          subjectId: null,
-          academicYear,
-        },
-        {
-          $set: {
-            teacher: teacherId,
-            status: "active",
-            notes: notes || "Updated by principal",
-          },
-        },
-        { new: true }
-      );
-    }
-    throw error;
-  }
-};
-
-const deactivateClassTeacherAssignments = async ({ classId, academicYear, notes = "" }) => {
-  if (!classId || !academicYear) return;
-
-  await TeacherAssignment.updateMany(
-    {
-      assignmentType: "class_teacher",
-      class: classId,
-      academicYear,
-      status: "active",
-    },
-    {
-      $set: {
-        status: "inactive",
-        notes: notes || "Class teacher removed",
-      },
-    }
-  );
-};
-
 const buildClassFilters = (query) => {
   const {
     search,
@@ -2502,20 +2065,6 @@ export const createClass = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  if (classTeacher) {
-    try {
-      await upsertClassTeacherAssignment({
-        classDoc: classData,
-        teacherId: classTeacher,
-        academicYear: classData.academicYear,
-        notes: "Class teacher assigned during class creation",
-      });
-    } catch (assignmentError) {
-      console.error("Warning: Teacher assignment failed during class creation:", assignmentError);
-      // Don't fail the class creation if teacher assignment fails
-    }
-  }
-
   const created = await Class.findById(classData._id)
     .populate("classTeacher", "name email department phone personal.firstName personal.lastName contact.email contact.phone professional.department employeeId");
 
@@ -2706,38 +2255,6 @@ export const updateClass = asyncHandler(async (req, res) => {
 
     throw error;
   }
-
-  try {
-    await syncTeacherAssignmentClassSnapshot(classData);
-
-    if (classData.classTeacher) {
-      await upsertClassTeacherAssignment({
-        classDoc: classData,
-        teacherId: classData.classTeacher,
-        academicYear: classData.academicYear,
-        notes: classTeacherReason || "Class teacher assignment updated by principal",
-      });
-
-      if (previousAcademicYear && previousAcademicYear !== classData.academicYear) {
-        await deactivateClassTeacherAssignments({
-          classId: classData._id,
-          academicYear: previousAcademicYear,
-          notes: `Class moved from academic year ${previousAcademicYear} to ${classData.academicYear}`,
-        });
-      }
-    } else {
-      await deactivateClassTeacherAssignments({
-        classId: classData._id,
-        academicYear: classData.academicYear,
-        notes: classTeacherReason || "Class teacher removed by principal",
-      });
-    }
-  } catch (assignmentError) {
-    console.error("Warning: Teacher assignment sync failed:", assignmentError);
-    // Don't fail the entire operation if teacher assignment sync fails
-    // Log the error and continue
-  }
-
   const updated = await Class.findById(classData._id)
     .populate("classTeacher", "name email department phone personal.firstName personal.lastName contact.email contact.phone professional.department employeeId");
 

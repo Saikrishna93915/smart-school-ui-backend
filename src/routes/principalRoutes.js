@@ -20,10 +20,6 @@ import {
   exportReportCSV,
   exportReportJSON,
   // New modules
-  getTeacherAssignments,
-  saveTeacherAssignment,
-  updateTeacherAssignment,
-  deleteTeacherAssignment,
   assignClassTeacher,
   transferClassTeacher,
   getClassTeacherByClass,
@@ -73,12 +69,6 @@ router.put("/announcements/:id/pin", pinAnnouncement);
 router.put("/announcements/:id/archive", archiveAnnouncement);
 router.put("/announcements/:id", updateAnnouncement);
 router.delete("/announcements/:id", deleteAnnouncement);
-
-// Teacher Assignment
-router.get("/teacher-assignments", getTeacherAssignments);
-router.post("/teacher-assignments", saveTeacherAssignment);
-router.put("/teacher-assignments/:id", updateTeacherAssignment);
-router.delete("/teacher-assignments/:id", deleteTeacherAssignment);
 
 // Class Teacher Management
 router.post("/class-teacher/assign", assignClassTeacher);
