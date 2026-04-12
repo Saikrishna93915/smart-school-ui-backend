@@ -4,6 +4,7 @@ import ProgressMarkEntry from '../models/ProgressMarkEntry.js';
 import ProgressClassRemark from '../models/ProgressClassRemark.js';
 import TeacherAssignment from '../models/TeacherAssignment.js';
 import Teacher from '../models/Teacher.js';
+import Class from '../models/Class.js';
 import Student from '../models/Student.js';
 import Subject from '../models/Subject.js';
 
@@ -41,7 +42,28 @@ async function ensureTeacherAuthorizedForSubject({ user, className, section, sub
   const teacherProfileId = await resolveTeacherProfileId(user);
   if (!teacherProfileId) return false;
 
+  const classDoc = await Class.findOne({
+    name: className,
+    section,
+    academicYear
+  }).select('_id classTeacher');
+
+  if (classDoc?.classTeacher && classDoc.classTeacher.toString() === teacherProfileId.toString()) {
+    return true;
+  }
+
   const assignment = await TeacherAssignment.findOne({
+    teacher: teacherProfileId,
+    assignmentType: 'subject_teacher',
+    class: classDoc?._id,
+    subject: subjectId,
+    academicYear,
+    status: 'active'
+  }).select('_id');
+
+  if (assignment) return true;
+
+  const legacyAssignment = await TeacherAssignment.findOne({
     teacherId: teacherProfileId,
     className,
     section,
@@ -50,7 +72,7 @@ async function ensureTeacherAuthorizedForSubject({ user, className, section, sub
     isActive: true
   }).select('_id');
 
-  return Boolean(assignment);
+  return Boolean(legacyAssignment);
 }
 
 async function ensureTeacherAuthorizedForClass({ user, className, section, academicYear }) {
@@ -60,7 +82,27 @@ async function ensureTeacherAuthorizedForClass({ user, className, section, acade
   const teacherProfileId = await resolveTeacherProfileId(user);
   if (!teacherProfileId) return false;
 
+  const classDoc = await Class.findOne({
+    name: className,
+    section,
+    academicYear
+  }).select('_id classTeacher');
+
+  if (classDoc?.classTeacher && classDoc.classTeacher.toString() === teacherProfileId.toString()) {
+    return true;
+  }
+
   const assignment = await TeacherAssignment.findOne({
+    teacher: teacherProfileId,
+    assignmentType: 'class_teacher',
+    class: classDoc?._id,
+    academicYear,
+    status: 'active'
+  }).select('_id');
+
+  if (assignment) return true;
+
+  const legacyAssignment = await TeacherAssignment.findOne({
     teacherId: teacherProfileId,
     className,
     section,
@@ -68,7 +110,7 @@ async function ensureTeacherAuthorizedForClass({ user, className, section, acade
     isActive: true
   }).select('_id');
 
-  return Boolean(assignment);
+  return Boolean(legacyAssignment);
 }
 
 export const createExamCycle = asyncHandler(async (req, res) => {

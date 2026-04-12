@@ -12,6 +12,7 @@ import { generateAttendanceReport } from '../controllers/attendanceReportControl
 // ✅ Import existing security middlewares
 import { protect } from '../middlewares/authMiddleware.js';
 import { authorize } from '../middlewares/roleMiddleware.js';
+import { requireClassTeacherAccess } from '../middlewares/classTeacherAccess.js';
 
 const router = express.Router();
 
@@ -21,15 +22,15 @@ const router = express.Router();
 
 // Route: POST /api/admin/attendance/mark
 // Marks or updates student attendance for a specific session (FN/AF)
-router.post('/mark', protect, authorize('admin', 'owner', 'teacher'), markAttendance);
+router.post('/mark', protect, authorize('admin', 'owner', 'teacher'), requireClassTeacherAccess(), markAttendance);
 
 // Route: GET /api/admin/attendance/by-class
 // Fetches attendance records to populate the management grid
-router.get('/by-class', protect, authorize('admin', 'owner', 'teacher'), getAttendanceByClass);
+router.get('/by-class', protect, authorize('admin', 'owner', 'teacher'), requireClassTeacherAccess(), getAttendanceByClass);
 
 // Route: GET /api/admin/attendance/summary
 // Fetches daily statistics (Present, Absent, Half-Day) for the dashboard
-router.get('/summary', protect, authorize('admin', 'owner', 'teacher'), getAttendanceSummary);
+router.get('/summary', protect, authorize('admin', 'owner', 'teacher'), requireClassTeacherAccess(), getAttendanceSummary);
 
 
 /**
@@ -55,6 +56,6 @@ router.get('/working-days', protect, authorize('admin', 'owner', 'teacher'), get
 // Route: GET /api/admin/attendance/report
 // Generates professional attendance reports (day/week/month/year)
 // Query params: class, section, reportType (day|week|month|year), startDate, endDate
-router.get('/report', protect, authorize('admin', 'owner', 'teacher'), generateAttendanceReport);
+router.get('/report', protect, authorize('admin', 'owner', 'teacher'), requireClassTeacherAccess(), generateAttendanceReport);
 
 export default router;

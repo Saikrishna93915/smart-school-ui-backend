@@ -9,6 +9,7 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import School from "../src/models/School.js";
 import AcademicYear from "../src/models/AcademicYear.js";
+import Setting from "../src/models/Setting.js";
 import User from "../src/models/User.js";
 
 dotenv.config();
@@ -166,11 +167,57 @@ const seedDefaultSettings = async () => {
       console.log(`   Status: ${academicYear.status}\n`);
     }
 
+    // Seed default advanced settings layout
+    const advancedSettings = await Setting.findOne({
+      schoolId: school._id,
+      type: "advanced",
+      key: "root"
+    });
+
+    if (!advancedSettings) {
+      console.log("📝 Creating default advanced settings...");
+
+      await Setting.create({
+        schoolId: school._id,
+        type: "advanced",
+        category: "system",
+        key: "root",
+        dataType: "object",
+        group: "advanced",
+        value: {
+          layout: {
+            navigationMode: "hybrid",
+            mobileNavigation: "cards",
+            showSidebar: true,
+            showDashboardCards: true,
+            featuredModules: [
+              "dashboard",
+              "attendance",
+              "fees",
+              "students",
+              "teachers",
+              "exams",
+              "classes",
+              "reports",
+              "notifications",
+              "communication",
+              "settings"
+            ]
+          }
+        }
+      });
+
+      console.log("✅ Advanced settings created successfully!");
+    } else {
+      console.log("⚠️  Advanced settings already exists:\n");
+    }
+
     console.log("╔════════════════════════════════════════════════╗");
     console.log("║     DEFAULT SETTINGS INITIALIZED              ║");
     console.log("╠════════════════════════════════════════════════╣");
     console.log("║  School Profile:        ✅ Created            ║");
     console.log("║  Academic Year:         ✅ Created            ║");
+    console.log("║  Advanced Layout:       ✅ Created            ║");
     console.log("║  Grading System:        ✅ Configured         ║");
     console.log("║  Timetable:             ✅ Set                ║");
     console.log("╚════════════════════════════════════════════════╝");

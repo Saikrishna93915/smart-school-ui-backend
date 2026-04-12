@@ -1,95 +1,77 @@
 import mongoose from "mongoose";
 
-/**
- * TeacherAssignment Model
- * Defines which teacher teaches which subject for which class and section
- * Core model for ERP teacher-subject mapping
- */
-const TeacherAssignmentSchema = new mongoose.Schema(
-  {
-    teacherId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Teacher",
-      required: true
-    },
-    
-    className: {
-      type: String,
-      required: true,
-      // LKG, UKG, 1st Class, 2nd Class, ..., 10th Class
-    },
-    
-    section: {
-      type: String,
-      required: true,
-      enum: ["A", "B", "C", "D"],
-    },
-    
-    subjectId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Subject",
-      required: true
-    },
-    
-    academicYear: {
-      type: String,
-      required: true,
-      default: "2025-2026"
-    },
-    
-    isActive: {
-      type: Boolean,
-      default: true
-    },
-    
-    // Assignment metadata
-    assignedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true
-    },
-    
-    assignedDate: {
-      type: Date,
-      default: Date.now
-    },
-    
-    // Notes for admin reference
-    notes: {
-      type: String,
-      trim: true
-    }
+const teacherAssignmentSchema = new mongoose.Schema({
+  assignmentType: {
+    type: String,
+    enum: ["subject_teacher", "class_teacher"],
+    default: "subject_teacher",
   },
-  { 
-    timestamps: true,
-    // Ensure no duplicate assignments
-    indexes: [
-      { teacherId: 1, className: 1, section: 1, subjectId: 1, academicYear: 1 }
-    ]
-  }
-);
-
-// Compound index to prevent duplicate assignments
-TeacherAssignmentSchema.index(
-  { className: 1, section: 1, subjectId: 1, academicYear: 1 },
-  { unique: true }
-);
-
-// Virtual to get teacher details populated
-TeacherAssignmentSchema.virtual('teacherDetails', {
-  ref: 'Teacher',
-  localField: 'teacherId',
-  foreignField: '_id',
-  justOne: true
+  teacher: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Teacher",
+    required: true,
+  },
+  class: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Class",
+    required: true,
+  },
+  className: {
+    type: String,
+    default: null,
+    trim: true,
+  },
+  section: {
+    type: String,
+    default: null,
+    trim: true,
+  },
+  subject: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Subject",
+    default: null,
+  },
+  subjectId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Subject",
+    default: null,
+  },
+  academicYear: {
+    type: String,
+    required: true,
+  },
+  term: {
+    type: String,
+    enum: ["term1", "term2", "annual"],
+    default: "annual",
+  },
+  periodsPerWeek: {
+    type: Number,
+    default: 5,
+    min: 0,
+    max: 50,
+  },
+  isPrimary: {
+    type: Boolean,
+    default: false,
+  },
+  status: {
+    type: String,
+    enum: ["active", "inactive", "pending", "on_leave"],
+    default: "active",
+  },
+  notes: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+}, {
+  timestamps: true,
 });
 
-// Virtual to get subject details
-TeacherAssignmentSchema.virtual('subjectDetails', {
-  ref: 'Subject',
-  localField: 'subjectId',
-  foreignField: '_id',
-  justOne: true
-});
+teacherAssignmentSchema.index({ class: 1, academicYear: 1, assignmentType: 1 });
+teacherAssignmentSchema.index({ teacher: 1, academicYear: 1 });
 
-const TeacherAssignment = mongoose.model("TeacherAssignment", TeacherAssignmentSchema);
+const TeacherAssignment = mongoose.model("TeacherAssignment", teacherAssignmentSchema);
+
 export default TeacherAssignment;
