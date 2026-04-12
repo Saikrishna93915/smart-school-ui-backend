@@ -244,16 +244,44 @@ export const login = asyncHandler(async (req, res) => {
   }
 
   if (role.toLowerCase() === 'parent') {
-    const children = await Student.find({ 
-      "parentInfo.email": username.trim().toLowerCase(),
-      status: { $ne: "deleted" }
-    }).lean();
-    
+    // First try to use the children array stored on the User document
+    let children = [];
+    if (user.children && user.children.length > 0) {
+      children = await Student.find({
+        _id: { $in: user.children },
+        status: { $ne: "deleted" }
+      }).lean();
+    }
+
+    // Fallback: query using the correct Student model fields if no children array
+    if (children.length === 0) {
+      children = await Student.find({
+        $or: [
+          { "parents.father.email": username.trim().toLowerCase() },
+          { "parents.mother.email": username.trim().toLowerCase() },
+          { "parents.father.phone": username.trim() },
+          { "parents.mother.phone": username.trim() }
+        ],
+        status: { $ne: "deleted" }
+      }).lean();
+
+      // Update parent User with children linkage for future API calls
+      if (children.length > 0) {
+        await User.findByIdAndUpdate(user._id, {
+          $set: {
+            linkedId: user.linkedId || children[0]._id,
+            children: children.map(c => c._id)
+          }
+        });
+      }
+    }
+
     additionalData.children = children.map(child => ({
       id: child._id,
-      name: `${child.personal?.firstName || ''} ${child.personal?.lastName || ''}`.trim(),
-      class: child.academic?.class || '',
-      section: child.academic?.section || ''
+      name: `${child.student?.firstName || ''} ${child.student?.lastName || ''}`.trim() || `${child.admissionNumber || 'Unknown'}`,
+      className: child.class?.className || '',
+      section: child.class?.section || '',
+      admissionNumber: child.admissionNumber || ''
     }));
   }
 

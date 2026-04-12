@@ -3,6 +3,7 @@ import Payment from "../models/Payment.js";
 import FeeStructure from "../models/FeeStructure.js";
 import Receipt from "../models/Receipt.js";
 import Student from "../models/Student.js";
+import User from "../models/User.js";
 import FeeAudit from "../models/FeeAudit.js";
 import { convertToWords } from "../utils/numberToWords.js";
 
@@ -772,35 +773,84 @@ export const getFeeAuditHistory = asyncHandler(async (req, res) => {
 
 // @desc    Get fee structure for current student
 // @route   GET /api/fees/my-fee-structure
-// @access  Private (Student)
+// @access  Private (Student, Parent)
 export const getMyFeeStructure = asyncHandler(async (req, res) => {
   try {
-    // Get current user ID from auth middleware
     const userId = req.user._id;
+    let student = null;
 
-    // Find student with this userId
-    const student = await Student.findOne({ userId });
-    
+    if (req.user.role === 'parent') {
+      // For parents: find student by linkedId or by children array
+      const parentId = userId;
+      const parentUser = await User.findById(parentId).lean();
+
+      let studentIds = [];
+      if (parentUser?.children && parentUser.children.length > 0) {
+        studentIds = parentUser.children;
+      } else if (parentUser?.linkedId) {
+        studentIds = [parentUser.linkedId];
+      } else {
+        // Fallback: find students by parent email/phone
+        const email = parentUser?.email?.toLowerCase();
+        if (email) {
+          const students = await Student.find({
+            $or: [
+              { "parents.father.email": email },
+              { "parents.mother.email": email }
+            ],
+            status: { $ne: "deleted" }
+          }).lean();
+          studentIds = students.map(s => s._id);
+        }
+      }
+
+      if (studentIds.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No children linked to this parent account"
+        });
+      }
+
+      // Return fee structure for the first (or specified) child
+      const feeStructures = await FeeStructure.find({ studentId: { $in: studentIds } }).lean();
+      if (feeStructures.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No fee structure found for your children"
+        });
+      }
+
+      // Return all children's fee data
+      const students = await Student.find({ _id: { $in: studentIds } }).lean();
+
+      const result = feeStructures.map(fs => {
+        const stu = students.find(s => String(s._id) === String(fs.studentId));
+        const totalFee = fs.totalFee || 0;
+        const totalPaid = fs.totalPaid || 0;
+        const totalDue = Math.max(0, totalFee - totalPaid - (fs.discountApplied || 0));
+        return {
+          ...fs,
+          studentName: stu ? `${stu.student?.firstName || ''} ${stu.student?.lastName || ''}`.trim() : 'Unknown',
+          className: stu?.class?.className || '',
+          section: stu?.class?.section || '',
+          summary: { totalFee, totalPaid, totalDue, paidPercentage: totalFee > 0 ? (totalPaid / totalFee) * 100 : 0, discount: fs.discountApplied || 0 }
+        };
+      });
+
+      return res.status(200).json({ success: true, data: result.length === 1 ? result[0] : result });
+    }
+
+    // For students: find student by userId
+    student = await Student.findOne({ userId });
     if (!student) {
-      return res.status(404).json({
-        success: false,
-        message: "Student profile not found"
-      });
+      return res.status(404).json({ success: false, message: "Student profile not found" });
     }
 
-    // Find fee structure using studentId
-    const feeStructure = await FeeStructure.findOne({ 
-      studentId: student._id 
-    });
-
+    const feeStructure = await FeeStructure.findOne({ studentId: student._id });
     if (!feeStructure) {
-      return res.status(404).json({
-        success: false,
-        message: "Fee structure not found for this student"
-      });
+      return res.status(404).json({ success: false, message: "Fee structure not found for this student" });
     }
 
-    // Calculate payment summary
     const totalFee = feeStructure.totalFee || 0;
     const totalPaid = feeStructure.totalPaid || 0;
     const totalDue = Math.max(0, totalFee - totalPaid - (feeStructure.discountApplied || 0));
@@ -810,21 +860,12 @@ export const getMyFeeStructure = asyncHandler(async (req, res) => {
       success: true,
       data: {
         ...feeStructure.toObject(),
-        summary: {
-          totalFee,
-          totalPaid,
-          totalDue,
-          paidPercentage,
-          discount: feeStructure.discountApplied || 0
-        }
+        summary: { totalFee, totalPaid, totalDue, paidPercentage, discount: feeStructure.discountApplied || 0 }
       }
     });
   } catch (error) {
     console.error("❌ Error fetching student fee structure:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch fee structure"
-    });
+    res.status(500).json({ success: false, message: "Failed to fetch fee structure" });
   }
 });
 

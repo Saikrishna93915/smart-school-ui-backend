@@ -46,6 +46,11 @@ const userSchema = new mongoose.Schema(
       default: null
     },
 
+    children: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Student'
+    }],
+
     forcePasswordChange: {
       type: Boolean,
       default: true

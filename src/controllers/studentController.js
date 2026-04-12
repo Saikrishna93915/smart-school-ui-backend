@@ -39,7 +39,7 @@ const createStudentUser = async (student) => {
 /**
  * Create parent user account when a student is added/registered
  */
-const createParentUser = async (parentData) => {
+const createParentUser = async (parentData, studentId = null) => {
   try {
     if (!parentData || !parentData.email) {
       console.log("ℹ️ No parent email provided, skipping parent account creation");
@@ -47,7 +47,7 @@ const createParentUser = async (parentData) => {
     }
 
     const parentEmail = parentData.email.toLowerCase().trim();
-    
+
     // Check if parent already exists
     const existingParent = await User.findOne({
       $or: [
@@ -59,6 +59,13 @@ const createParentUser = async (parentData) => {
 
     if (existingParent) {
       console.log(`ℹ️ Parent account already exists: ${existingParent._id}`);
+      // Link this student to existing parent if studentId provided
+      if (studentId && !existingParent.children?.map(String).includes(String(studentId))) {
+        await User.findByIdAndUpdate(existingParent._id, {
+          $push: { children: studentId },
+          $setOnInsert: { linkedId: existingParent.linkedId || studentId }
+        });
+      }
       return existingParent;
     }
 
@@ -73,7 +80,8 @@ const createParentUser = async (parentData) => {
       phone: parentData.phone || "",
       password: defaultPassword,
       role: "parent",
-      linkedId: null, // Parent account for general tracking
+      linkedId: studentId, // Link to primary child
+      children: studentId ? [studentId] : [], // Track all children
       forcePasswordChange: true,
       active: true
     });
@@ -127,7 +135,7 @@ export const createStudent = async (req, res) => {
         name: req.body.parents.father.name,
         email: req.body.parents.father.email,
         phone: req.body.parents.father.phone
-      });
+      }, student._id);
     }
 
     if (req.body.parents?.mother?.email) {
@@ -135,7 +143,7 @@ export const createStudent = async (req, res) => {
         name: req.body.parents.mother.name,
         email: req.body.parents.mother.email,
         phone: req.body.parents.mother.phone
-      });
+      }, student._id);
     }
 
     res.status(201).json({

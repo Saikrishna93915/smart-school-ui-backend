@@ -65,6 +65,7 @@ import cashierRoutes from "./routes/cashierRoutes.js"; // Cashier portal
 import cashierStatementRoutes from "./routes/cashierStatementRoutes.js"; // Cashier Statement/Transaction History
 import feeFollowUpRoutes from "./routes/feeFollowUpRoutes.js"; // Fee Follow-up & Email Campaigns
 import driverRoutes from "./routes/driverRoutes.js"; // Driver portal
+import parentRoutes from "./routes/parentRoutes.js"; // Parent portal
 
 /* =========================
    ENV & DB CONFIG
@@ -309,6 +310,7 @@ app.use("/api/cashier", cashierRoutes);     // Cashier fee collection
 app.use("/api/cashier", cashierStatementRoutes); // Cashier transaction history & statement (all routes prefixed with /statement)
 app.use("/api/cashier/follow-ups", feeFollowUpRoutes); // Fee follow-up & bulk emails
 app.use("/api/driver", driverRoutes);       // Driver trip management
+app.use("/api/parent", parentRoutes);       // Parent portal
 
 /* =========================
    HEALTH ROUTES
