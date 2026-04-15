@@ -15,6 +15,12 @@ import Subject from '../models/Subject.js';
 import ProgressMarkEntry from '../models/ProgressMarkEntry.js';
 import ProgressExamCycle from '../models/ProgressExamCycle.js';
 import ProgressClassRemark from '../models/ProgressClassRemark.js';
+import Announcement from '../models/Announcement.js';
+import Assignment from '../models/Assignment.js';
+import AssignmentSubmission from '../models/AssignmentSubmission.js';
+import Trip from '../models/Trip.js';
+import Vehicle from '../models/Vehicle.js';
+import Class from '../models/Class.js';
 
 /**
  * Helper: Get all children for a parent user
@@ -55,25 +61,56 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
   if (children.length === 0) {
     return res.status(200).json({
       success: true,
-      data: { children: [], summary: { totalChildren: 0, avgAttendance: 0, totalFeesDue: 0 } }
+      data: {
+        children: [],
+        summary: { totalChildren: 0, avgAttendance: 0, totalFeesDue: 0 },
+        announcements: [],
+        upcomingEvents: [],
+        notifications: { unread: 0, alerts: [] }
+      }
     });
   }
 
   const childIds = children.map(c => c._id);
+  const childIdStrs = childIds.map(id => String(id));
 
-  // Get today's date range
+  // ========================
+  // 1. TODAY'S ATTENDANCE
+  // ========================
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
-  // Get today's attendance for all children
   const todayAttendance = await Attendance.find({
     studentId: { $in: childIds },
     date: { $gte: today, $lt: tomorrow }
   }).lean();
 
-  // Get this month's fee data
+  // ========================
+  // 2. MONTHLY ATTENDANCE STATS
+  // ========================
+  const monthStart = new Date(today.getUTCFullYear(), today.getUTCMonth(), 1);
+  const monthAttendance = await Attendance.find({
+    studentId: { $in: childIds },
+    date: { $gte: monthStart, $lt: tomorrow }
+  }).lean();
+
+  let presentCount = 0;
+  let totalCount = 0;
+  let absentCount = 0;
+  for (const record of monthAttendance) {
+    if (record.sessions?.morning === 'present') { presentCount++; totalCount++; }
+    else if (record.sessions?.morning === 'absent') { absentCount++; totalCount++; }
+    if (record.sessions?.afternoon === 'present') { presentCount++; totalCount++; }
+    else if (record.sessions?.afternoon === 'absent') { absentCount++; totalCount++; }
+  }
+
+  const avgAttendance = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+
+  // ========================
+  // 3. FEES DATA
+  // ========================
   const feeData = await FeeStructure.find({
     studentId: { $in: childIds }
   }).lean();
@@ -83,9 +120,20 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
     return sum + due;
   }, 0);
 
-  // Get performance data for each child (latest exam results)
+  // Recent transactions (last 5 across all children)
+  const recentTransactions = await Payment.find({
+    studentId: { $in: childIds }
+  })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .select('amount paidAmount dueAmount status paymentDate paymentMethod receiptNumber description studentName className')
+    .lean();
+
+  // ========================
+  // 4. PERFORMANCE DATA
+  // ========================
   const performanceData = await ProgressMarkEntry.aggregate([
-    { $match: { studentId: { $in: childIds.map(id => String(id)) } } },
+    { $match: { studentId: { $in: childIdStrs } } },
     { $group: {
       _id: { studentId: '$studentId', examCycleId: '$examCycleId' },
       totalObtained: { $sum: '$totalMarks' },
@@ -95,7 +143,6 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
     { $sort: { '_id.examCycleId': -1 } }
   ]);
 
-  // Get published exam cycle names
   const examCycleIds = [...new Set(performanceData.map(p => String(p._id.examCycleId)))];
   const examCycles = await ProgressExamCycle.find({ _id: { $in: examCycleIds } })
     .select('_id examName examType')
@@ -103,7 +150,6 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
   const examMap = {};
   examCycles.forEach(e => { examMap[String(e._id)] = e; });
 
-  // Build performance summary per child
   const childPerformanceMap = {};
   for (const perf of performanceData) {
     const studentId = String(perf._id.studentId);
@@ -122,19 +168,123 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
         totalMax: perf.totalMax,
         subjects: perf.subjectCount
       };
-      childPerformanceMap[studentId].examsTaken++;
-    } else {
-      childPerformanceMap[studentId].examsTaken++;
-      // Calculate overall average
-      const prev = childPerformanceMap[studentId];
-      const newPct = parseFloat(pct);
-      prev.overallPercentage = prev.latestExam
-        ? ((prev.latestExam.percentage + newPct) / 2).toFixed(1)
-        : pct;
+    }
+    childPerformanceMap[studentId].examsTaken++;
+  }
+
+  // ========================
+  // 5. ANNOUNCEMENTS (latest 5 published, not expired)
+  // ========================
+  const now = new Date();
+  const announcements = await Announcement.find({
+    status: 'published',
+    $or: [
+      { 'audience.type': 'all' },
+      { 'audience.type': 'parents' },
+      { 'audience.parentIds': { $in: [req.user._id] } }
+    ],
+    $or: [
+      { expiresAt: { $gt: now } },
+      { expiresAt: null }
+    ]
+  })
+    .sort({ pinned: -1, createdAt: -1 })
+    .limit(5)
+    .select('title type priority createdAt pinned')
+    .lean();
+
+  // ========================
+  // 6. UPCOMING EXAM EVENTS
+  // ========================
+  const upcomingExams = await ProgressExamCycle.find({
+    isPublished: true,
+    resultDate: { $gte: now }
+  })
+    .sort({ resultDate: 1 })
+    .limit(3)
+    .select('examName examType resultDate')
+    .lean();
+
+  // ========================
+  // 7. HOMEWORK / ASSIGNMENTS (pending for each child's class)
+  // ========================
+  // Look up Class ObjectIds by className/section (Assignment.classId is an ObjectId ref)
+  const classNames = [...new Set(children.map(c => c.class?.className).filter(Boolean))];
+  const sections = [...new Set(children.map(c => c.class?.section).filter(Boolean))];
+
+  let classObjectIds = [];
+  if (classNames.length > 0) {
+    const classes = await Class.find({ className: { $in: classNames } }).select('_id className').lean();
+    classObjectIds = classes.map(c => c._id);
+  }
+
+  // Query assignments by resolved class ObjectIds
+  const pendingAssignments = classObjectIds.length > 0
+    ? await Assignment.find({
+        classId: { $in: classObjectIds },
+        sectionId: { $in: sections },
+        status: 'published',
+        dueDate: { $gte: now }
+      })
+        .sort({ dueDate: 1 })
+        .limit(5)
+        .populate('subjectId', 'subjectName')
+        .select('title subjectId dueDate totalPoints status')
+        .lean()
+    : [];
+
+  // Count pending submissions per child (by className + section)
+  const assignmentCounts = {};
+  for (const child of children) {
+    const childClassObj = classObjectIds.length > 0
+      ? await Class.findOne({ className: child.class?.className }).select('_id').lean()
+      : null;
+
+    const count = childClassObj
+      ? await Assignment.countDocuments({
+          classId: childClassObj._id,
+          sectionId: child.class?.section,
+          status: 'published',
+          dueDate: { $gte: now }
+        })
+      : 0;
+    assignmentCounts[String(child._id)] = count;
+  }
+
+  // ========================
+  // 8. TRANSPORT STATUS (today's trips for children)
+  // ========================
+  const transportData = {};
+  for (const child of children) {
+    if (child.transport === 'yes') {
+      const todayTrip = await Trip.findOne({
+        'students.studentId': child._id,
+        scheduledStart: { $gte: today, $lt: tomorrow },
+        status: { $in: ['scheduled', 'in-progress'] }
+      })
+        .populate('vehicle', 'vehicleNo type status currentLocation')
+        .select('tripType status scheduledStart actualStart vehicle')
+        .lean();
+
+      if (todayTrip) {
+        const studentTrip = todayTrip.students.find(s => String(s.studentId) === String(child._id));
+        const vehicle = todayTrip.vehicle;
+        transportData[String(child._id)] = {
+          vehicleNo: vehicle?.vehicleNo || 'N/A',
+          vehicleType: vehicle?.type || 'bus',
+          tripType: todayTrip.tripType,
+          status: todayTrip.status,
+          scheduledStart: todayTrip.scheduledStart,
+          actualStart: todayTrip.actualStart,
+          boardingStop: studentTrip?.boardingStop
+        };
+      }
     }
   }
 
-  // Build children summary with performance
+  // ========================
+  // 9. BUILD CHILDREN SUMMARY
+  // ========================
   const childrenSummary = children.map(child => {
     const attendance = todayAttendance.find(a => String(a.studentId) === String(child._id));
     const fees = feeData.find(f => String(f.studentId) === String(child._id));
@@ -143,47 +293,142 @@ export const getParentDashboard = asyncHandler(async (req, res) => {
     const due = Math.max(0, totalFee - totalPaid - (fees?.discountApplied || 0));
     const perf = childPerformanceMap[String(child._id)] || { latestExam: null, overallPercentage: 0, examsTaken: 0 };
 
+    // Get next due date from payment schedule
+    let nextDueDate = null;
+    if (fees?.paymentSchedule) {
+      const upcoming = fees.paymentSchedule
+        .filter(s => s.status === 'pending' && new Date(s.dueDate) >= now)
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
+      if (upcoming) nextDueDate = upcoming.dueDate;
+    }
+
     return {
       id: child._id,
       name: `${child.student?.firstName || ''} ${child.student?.lastName || ''}`.trim() || child.admissionNumber,
       className: child.class?.className || '',
       section: child.class?.section || '',
       admissionNumber: child.admissionNumber,
+      dob: child.student?.dob,
+      gender: child.student?.gender,
       attendanceToday: attendance ? {
         morning: attendance.sessions?.morning || 'not_marked',
         afternoon: attendance.sessions?.afternoon || 'not_marked'
       } : null,
+      attendanceMonthly: {
+        present: presentCount,
+        absent: absentCount,
+        total: totalCount,
+        percentage: totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0
+      },
       feesDue: due,
       totalFee,
-      performance: perf
+      totalPaid,
+      nextDueDate,
+      performance: perf,
+      transport: transportData[String(child._id)] || null,
+      pendingAssignments: assignmentCounts[String(child._id)] || 0
     };
   });
 
-  // Calculate average attendance for the month
-  const monthStart = new Date(today.getUTCFullYear(), today.getUTCMonth(), 1);
-  const monthAttendance = await Attendance.find({
+  // ========================
+  // 10. NOTIFICATIONS (unread count + recent alerts)
+  // ========================
+  // Count unpaid/overdue payments as alerts
+  const overduePayments = await Payment.find({
     studentId: { $in: childIds },
-    date: { $gte: monthStart, $lt: tomorrow }
-  }).lean();
+    status: { $in: ['pending', 'overdue'] }
+  })
+    .sort({ dueDate: 1 })
+    .limit(3)
+    .select('studentName amount dueAmount status dueDate')
+    .lean();
 
-  let presentCount = 0;
-  let totalCount = 0;
-  for (const record of monthAttendance) {
-    if (record.sessions?.morning === 'present') { presentCount++; totalCount++; }
-    else if (record.sessions?.morning === 'absent') { totalCount++; }
-    if (record.sessions?.afternoon === 'present') { presentCount++; totalCount++; }
-    else if (record.sessions?.afternoon === 'absent') { totalCount++; }
-  }
+  const notifications = {
+    unread: overduePayments.length,
+    alerts: overduePayments.map(p => ({
+      type: 'fee_alert',
+      message: `Fee payment pending for ${p.studentName}`,
+      amount: p.dueAmount,
+      status: p.status,
+      dueDate: p.dueDate
+    }))
+  };
 
+  // ========================
+  // 11. FORMAT ANNOUNCEMENTS
+  // ========================
+  const formattedAnnouncements = announcements.map(a => ({
+    id: a._id,
+    title: a.title,
+    type: a.type,
+    priority: a.priority,
+    date: a.createdAt,
+    pinned: a.pinned
+  }));
+
+  // ========================
+  // 12. FORMAT UPCOMING EVENTS
+  // ========================
+  const upcomingEvents = upcomingExams.map(e => ({
+    id: e._id,
+    title: `${e.examName} (${e.examType})`,
+    type: 'exam',
+    date: e.resultDate
+  }));
+
+  // Add pending assignments as events
+  pendingAssignments.forEach(a => {
+    upcomingEvents.push({
+      id: a._id,
+      title: `${a.title}`,
+      type: 'assignment',
+      date: a.dueDate,
+      subject: a.subjectId?.subjectName || 'Unknown'
+    });
+  });
+
+  // Sort events by date, keep top 5
+  upcomingEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // ========================
+  // 13. FORMAT RECENT TRANSACTIONS
+  // ========================
+  const formattedTransactions = recentTransactions.map(t => ({
+    id: t._id,
+    studentName: t.studentName,
+    className: t.className,
+    amount: t.amount || t.paidAmount || 0,
+    dueAmount: t.dueAmount || 0,
+    status: t.status,
+    date: t.paymentDate || t.createdAt,
+    paymentMethod: t.paymentMethod,
+    receiptNumber: t.receiptNumber,
+    description: t.description
+  }));
+
+  // ========================
+  // 14. BUILD FINAL RESPONSE
+  // ========================
   res.status(200).json({
     success: true,
     data: {
       children: childrenSummary,
       summary: {
         totalChildren: children.length,
-        avgAttendance: totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0,
+        avgAttendance,
         totalFeesDue: totalDue
-      }
+      },
+      announcements: formattedAnnouncements,
+      upcomingEvents: upcomingEvents.slice(0, 5),
+      recentTransactions: formattedTransactions,
+      notifications,
+      pendingAssignments: pendingAssignments.map(a => ({
+        id: a._id,
+        title: a.title,
+        subject: a.subjectId?.subjectName || 'Unknown',
+        dueDate: a.dueDate,
+        totalPoints: a.totalPoints
+      }))
     }
   });
 });

@@ -1,30 +1,19 @@
 /**
  * PASSWORD GENERATOR UTILITY
- * Generates default passwords based on user role and sequential counter
+ * Generates default passwords based on user role from database configuration
  */
+
+import { getDefaultPassword } from '../services/configService.js';
 
 /**
  * Generate default password for a user
- * Format:
- * - Teacher: Teacher@123
- * - Parent: Parent@123
- * - Student: Student@123
- * - Owner: Owner@123
- * - Admin: Admin@123
+ * Format: Retrieved from database configuration
  */
-export const generateDefaultPassword = (role, sequenceNumber = 1) => {
-  const defaultPasswords = {
-    teacher: 'Teacher@123',
-    parent: 'Parent@123',
-    student: 'Student@123',
-    owner: 'Owner@123',
-    admin: 'Admin@123',
-    cashier: 'Cashier@123',
-    principal: 'Principal@123',
-    driver: 'Driver@123'
-  };
-
-  return defaultPasswords[role.toLowerCase()] || `${role.charAt(0).toUpperCase() + role.slice(1)}@123`;
+export const generateDefaultPassword = async (role, sequenceNumber = 1) => {
+  // DYNAMIC: Fetch from database instead of hardcoded
+  const password = await getDefaultPassword(role.toLowerCase());
+  
+  return password || `${role.charAt(0).toUpperCase() + role.slice(1)}@123`; // Fallback if not configured
 };
 
 /**
@@ -59,20 +48,12 @@ export const getNextSequenceNumber = async (User, role) => {
 /**
  * Verify if a password is a default password for a role
  */
-export const isDefaultPassword = (password, role) => {
-  const defaultPasswords = {
-    teacher: 'Teacher@123',
-    parent: 'Parent@123',
-    student: 'Student@123',
-    owner: 'Owner@123',
-    admin: 'Admin@123',
-    cashier: 'Cashier@123',
-    principal: 'Principal@123',
-    driver: 'Driver@123'
-  };
-
-  const expectedPassword = defaultPasswords[role.toLowerCase()] || `${role.charAt(0).toUpperCase() + role.slice(1)}@123`;
-  return password === expectedPassword;
+export const isDefaultPassword = async (password, role) => {
+  // DYNAMIC: Fetch from database instead of hardcoded
+  const defaultPwd = await getDefaultPassword(role.toLowerCase());
+  
+  if (!defaultPwd) return false;
+  return password === defaultPwd;
 };
 
 export default {

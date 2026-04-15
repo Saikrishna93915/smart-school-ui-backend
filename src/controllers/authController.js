@@ -5,6 +5,7 @@ import Student from "../models/Student.js";
 import Driver from "../models/Driver.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs"; // Import bcrypt for manual comparison
+import { getDefaultPassword } from "../services/configService.js";
 
 /* =========================
    GENERATE JWT TOKEN
@@ -163,16 +164,9 @@ export const login = asyncHandler(async (req, res) => {
 
     // Backward-compatibility for parent default password variants
     if (!isMatch && role.toLowerCase() === 'parent') {
-      const fallbackPasswords = ['Parent@123', 'Parents@123'];
-      for (const candidate of fallbackPasswords) {
-        if (candidate === password) continue;
-        const candidateMatch = typeof user.matchPassword === 'function'
-          ? await user.matchPassword(candidate)
-          : await bcrypt.compare(candidate, user.password);
-        if (candidateMatch) {
-          isMatch = true;
-          break;
-        }
+      const defaultPwd = await getDefaultPassword('parent');
+      if (defaultPwd && password === defaultPwd) {
+        isMatch = true;
       }
     }
   } catch (error) {
@@ -191,12 +185,14 @@ export const login = asyncHandler(async (req, res) => {
     // reset to a correctly hashed default and allow login.
     if (
       role.toLowerCase() === 'teacher' &&
-      password === 'Teacher@123' &&
       user.forcePasswordChange
     ) {
-      user.password = 'Teacher@123';
-      await user.save();
-      isMatch = true;
+      const defaultTeacherPwd = await getDefaultPassword('teacher');
+      if (defaultTeacherPwd && password === defaultTeacherPwd) {
+        user.password = defaultTeacherPwd; // Will be hashed by pre-save
+        await user.save();
+        isMatch = true;
+      }
     }
   }
 

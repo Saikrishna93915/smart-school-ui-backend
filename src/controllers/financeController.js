@@ -7,6 +7,7 @@ import Student from "../models/Student.js";
 import mongoose from "mongoose";
 import crypto from "crypto";
 import { convertToWords } from "../utils/numberToWords.js";
+import { getConfig, getSchoolName, getConfigsByCategory } from "../services/configService.js";
 
 const normalizeReceiptNumber = (value = '') => {
   let normalized = decodeURIComponent(String(value)).trim();
@@ -190,11 +191,12 @@ export const getStudentFeeDetails = asyncHandler(async (req, res) => {
 
     if (!feeStructure) {
       console.log(`📝 Creating new fee structure from data`);
-      
+
       const className = student.class?.className || '';
       const classNameParts = className.split('-');
       const cleanClassName = classNameParts[0] || className;
-      const section = classNameParts[1] || student.class?.section || 'A';
+      const defaultSection = await getConfig('academic.defaultSection', 'A');
+      const section = classNameParts[1] || student.class?.section || defaultSection;
       
       feeStructure = {
         admissionNumber: student.admissionNumber,

@@ -4,6 +4,7 @@ import ShiftSession from '../models/ShiftSession.js';
 import Cashier from '../models/Cashier.js';
 import Payment from '../models/Payment.js';
 import { sendEmail } from './emailService.js';
+import { getCashierVarianceThreshold } from '../services/configService.js';
 
 /**
  * Auto-close all open shifts at 6:00 PM daily
@@ -94,7 +95,7 @@ const autoCloseAllOpenShifts = async () => {
         }
 
         // CRITICAL FIX: Send admin notification if variance is significant
-        const varianceThreshold = 500; // Notify admin if variance > ₹500
+        const varianceThreshold = await getCashierVarianceThreshold(); // Dynamic from DB
         if (Math.abs(variance) > varianceThreshold) {
           await sendAdminVarianceNotification(shift, payments, variance);
         }

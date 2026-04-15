@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import Payment from "../models/Payment.js";
 import FeeStructure from "../models/FeeStructure.js";
 import Student from "../models/Student.js";
+import { getDefaulterThresholds } from "../services/configService.js";
 
 // @desc    Get fee defaulters with advanced filters
 // @route   GET /api/finance/fee-defaulters
@@ -162,6 +163,9 @@ export const getFeeDefaulters = asyncHandler(async (req, res) => {
       }
     });
 
+    // Get dynamic thresholds from database
+    const thresholds = await getDefaulterThresholds();
+
     // Step 6: Calculate priority based on days overdue and amount due - FIXED $cond syntax
     pipeline.push({
       $addFields: {
@@ -172,7 +176,7 @@ export const getFeeDefaulters = asyncHandler(async (req, res) => {
                 case: {
                   $or: [
                     { $gt: ['$daysOverdue', 30] },
-                    { $gt: ['$totalDue', 50000] }
+                    { $gt: ['$totalDue', thresholds.critical] }
                   ]
                 },
                 then: 1 // Critical
@@ -181,7 +185,7 @@ export const getFeeDefaulters = asyncHandler(async (req, res) => {
                 case: {
                   $or: [
                     { $and: [{ $gte: ['$daysOverdue', 15] }, { $lte: ['$daysOverdue', 30] }] },
-                    { $and: [{ $gt: ['$totalDue', 20000] }, { $lte: ['$totalDue', 50000] }] }
+                    { $and: [{ $gt: ['$totalDue', thresholds.high] }, { $lte: ['$totalDue', thresholds.critical] }] }
                   ]
                 },
                 then: 2 // High
@@ -190,7 +194,7 @@ export const getFeeDefaulters = asyncHandler(async (req, res) => {
                 case: {
                   $or: [
                     { $and: [{ $gte: ['$daysOverdue', 7] }, { $lt: ['$daysOverdue', 15] }] },
-                    { $and: [{ $gt: ['$totalDue', 5000] }, { $lte: ['$totalDue', 20000] }] }
+                    { $and: [{ $gt: ['$totalDue', thresholds.moderate] }, { $lte: ['$totalDue', thresholds.high] }] }
                   ]
                 },
                 then: 3 // Moderate

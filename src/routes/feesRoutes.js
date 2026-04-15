@@ -12,6 +12,9 @@ import {
   downloadReceiptPDF,
   getFeesAnalytics,
   exportPaymentsCSV,
+  getParentPaymentHistory,
+  getParentReceipts,
+  emailReceipt,
 } from "../controllers/feesController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 import { authorize } from "../middlewares/authorize.js";
@@ -21,7 +24,7 @@ const router = express.Router();
 // All routes require authentication
 router.use(protect);
 
-// ===== STUDENT ENDPOINTS =====
+// ===== STUDENT/PARENT ENDPOINTS =====
 
 // @route   GET /api/fees/my-fee-structure
 // @desc    Get current student's fee structure
@@ -32,8 +35,20 @@ router.get("/my-fee-structure", getMyFeeStructure);
 router.post("/pay", processStudentPayment);
 
 // @route   GET /api/fees/history/:studentId
-// @desc    Get student payment history
-router.get("/history/:studentId", getPaymentHistory);
+// @desc    Get student payment history (admin/teacher)
+router.get("/history/:studentId", authorize("admin", "finance", "accountant", "teacher"), getPaymentHistory);
+
+// @route   GET /api/fees/history (no studentId - parent context)
+// @desc    Get parent's children payment history
+router.get("/history", getParentPaymentHistory);
+
+// @route   GET /api/fees/receipts
+// @desc    Get parent's children receipts
+router.get("/receipts", getParentReceipts);
+
+// @route   POST /api/fees/receipts/email/:paymentId
+// @desc    Email receipt to parent
+router.post("/receipts/email/:paymentId", emailReceipt);
 
 // @route   GET /api/fees/receipts/download/:paymentId
 // @desc    Download receipt

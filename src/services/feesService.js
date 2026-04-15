@@ -8,6 +8,7 @@ import {
 import Student from "../models/Student.js";
 import Payment from "../models/Payment.js";
 import Receipt from "../models/Receipt.js";
+import { getLatePenaltyRate } from "../services/configService.js";
 
 // ===========================
 // FEE SERVICE
@@ -140,12 +141,13 @@ export class FeeService {
         const dueDate = new Date(installment.dueDate);
         let penalty = installment.penalty || 0;
 
-        // Calculate late penalty: 1% per month
+        // Calculate late penalty: configurable rate per month
         if (today > dueDate && installment.status !== "paid") {
           const monthsDue = Math.floor(
             (today - dueDate) / (1000 * 60 * 60 * 24 * 30)
           );
-          const latePenalty = installment.amount * (0.01 * monthsDue);
+          const lateRate = await getLatePenaltyRate(); // Dynamic from DB
+          const latePenalty = installment.amount * (lateRate * monthsDue);
           penalty = Math.max(penalty, latePenalty);
         }
 

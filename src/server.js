@@ -8,6 +8,7 @@ import { Server } from "socket.io";
 import connectDB from "./config/db.js";
 import historyRoutes from './routes/historyRoutes.js';
 import errorHandler from "./middlewares/errorHandler.js";
+import configRoutes from "./routes/configRoutes.js"; // NEW: System Configuration Routes
 
 // Import scheduler service
 import { startShiftAutoCloseScheduler } from "./services/shiftAutoCloseService.js"; // ADDED: Global error handler
@@ -250,6 +251,7 @@ app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
    API ROUTES
 ========================= */
 app.use("/api/auth", authRoutes);
+app.use("/api/config", configRoutes); // NEW: System Configuration Routes
 app.use("/api/admin", adminRoutes);
 app.use("/api/admin/students", studentRoutes);
 app.use("/api/admin/teachers", teacherRoutes);
@@ -425,6 +427,17 @@ app.use(errorHandler);
 ========================= */
 const PORT = process.env.PORT || 5000;
 
+const handleServerListenError = (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} is already in use. Stop the other server process or start this app with a different PORT value.`
+    );
+    process.exit(1);
+  }
+
+  throw error;
+};
+
 // Initialize database and start server
 const startServer = async () => {
   try {
@@ -434,7 +447,10 @@ const startServer = async () => {
     // Start the shift auto-close scheduler
     startShiftAutoCloseScheduler();
     
+    server.once("error", handleServerListenError);
+
     server.listen(PORT, () => {
+  server.off("error", handleServerListenError);
   console.log(`
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                                                                          ║

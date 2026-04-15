@@ -4,6 +4,7 @@ import Cashier from "../models/Cashier.js";
 import ShiftSession from "../models/ShiftSession.js";
 import Student from "../models/Student.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import { getCashierVarianceThreshold } from "../services/configService.js";
 
 const getCashierFromUser = async (userId) => {
   return Cashier.findOne({ $or: [{ user: userId }, { userId }], isDeleted: false });
@@ -445,7 +446,7 @@ export const closeShift = asyncHandler(async (req, res) => {
 
   // CRITICAL: Send admin notification if variance is significant
   try {
-    const varianceThreshold = 500; // Notify admin if variance > ₹500
+    const varianceThreshold = await getCashierVarianceThreshold(); // Dynamic from DB
     if (Math.abs(calculatedVariance) > varianceThreshold) {
       const { sendAdminVarianceNotification } = await import('../services/shiftAutoCloseService.js');
       await sendAdminVarianceNotification(shift, payments, calculatedVariance);

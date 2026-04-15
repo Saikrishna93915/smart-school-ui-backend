@@ -1,21 +1,8 @@
 import FeeStructure from "../models/FeeStructure.js";
+import { getConfig, getFeeStructureForClass } from "../services/configService.js";
 
-const feeConfig = {
-  "10th Class": { baseFee: 50000, transportFee: 25000, activityFee: 5000, examFee: 3000, otherFees: 2000 },
-  "11th Class": { baseFee: 55000, transportFee: 25000, activityFee: 5500, examFee: 3500, otherFees: 2500 },
-  "12th Class": { baseFee: 60000, transportFee: 25000, activityFee: 6000, examFee: 4000, otherFees: 3000 },
-  LKG: { baseFee: 20000, transportFee: 20000, activityFee: 3000, examFee: 1000, otherFees: 1000 },
-  UKG: { baseFee: 22000, transportFee: 20000, activityFee: 3500, examFee: 1500, otherFees: 1500 },
-  "1st Class": { baseFee: 25000, transportFee: 22000, activityFee: 4000, examFee: 2000, otherFees: 2000 },
-  "2nd Class": { baseFee: 27000, transportFee: 22000, activityFee: 4000, examFee: 2000, otherFees: 2000 },
-  "3rd Class": { baseFee: 29000, transportFee: 23000, activityFee: 4500, examFee: 2500, otherFees: 2000 },
-  "4th Class": { baseFee: 31000, transportFee: 23000, activityFee: 4500, examFee: 2500, otherFees: 2000 },
-  "5th Class": { baseFee: 33000, transportFee: 24000, activityFee: 4500, examFee: 2500, otherFees: 2000 },
-  "6th Class": { baseFee: 35000, transportFee: 24000, activityFee: 5000, examFee: 3000, otherFees: 2000 },
-  "7th Class": { baseFee: 38000, transportFee: 24000, activityFee: 5000, examFee: 3000, otherFees: 2000 },
-  "8th Class": { baseFee: 42000, transportFee: 25000, activityFee: 5000, examFee: 3000, otherFees: 2000 },
-  "9th Class": { baseFee: 46000, transportFee: 25000, activityFee: 5000, examFee: 3000, otherFees: 2000 },
-};
+// REMOVED: Hardcoded fee structure - now fetched from database dynamically
+// Use getConfig('fees.structure') or getFeeStructureForClass(className) instead
 
 const normalizeTransport = (value) => {
   if (typeof value === "boolean") return value ? "yes" : "no";
@@ -27,14 +14,27 @@ const normalizeTransport = (value) => {
   return "no";
 };
 
-const buildDefaultFeeStructurePayload = (student) => {
+const buildDefaultFeeStructurePayload = async (student) => {
   const className = student?.class?.className || "10th Class";
-  const config = feeConfig[className] || feeConfig["10th Class"];
+  
+  // DYNAMIC: Fetch fee structure from database instead of hardcoded values
+  const config = await getFeeStructureForClass(className);
+  
+  if (!config) {
+    console.warn(`⚠️ No fee structure found for class '${className}'. Using fallback.`);
+    // Fallback to minimal defaults if not configured
+    config = { baseFee: 15000, transportFee: 6000, activityFee: 3500, examFee: 5000, otherFees: 2000 };
+  }
+  
   const transport = normalizeTransport(student?.transport);
   const transportFee = transport === "yes" ? config.transportFee : 0;
-  const academicYear = student?.class?.academicYear || "2025-2026";
+  const academicYear = await getConfig('academic.currentYear', student?.class?.academicYear || "2025-2026");
   const totalFee = config.baseFee + config.activityFee + config.examFee + config.otherFees + transportFee;
-  const defaultDueDate = new Date(new Date().getFullYear(), 5, 30);
+  
+  // Get due date from config or use default
+  const defaultDueDateStr = await getConfig('fees.defaultDueDate', '06-30');
+  const [month, day] = defaultDueDateStr.split('-').map(Number);
+  const defaultDueDate = new Date(new Date().getFullYear(), month - 1, day);
 
   const feeComponents = [
     {
@@ -112,7 +112,7 @@ const buildDefaultFeeStructurePayload = (student) => {
 export const ensureFeeStructureForStudent = async (student) => {
   if (!student?._id || !student?.admissionNumber) return null;
 
-  const academicYear = student?.class?.academicYear || "2025-2026";
+  const academicYear = await getConfig('academic.currentYear', student?.class?.academicYear || "2025-2026");
   const existing = await FeeStructure.findOne({
     admissionNumber: student.admissionNumber,
     academicYear,
@@ -120,7 +120,8 @@ export const ensureFeeStructureForStudent = async (student) => {
 
   if (existing) return existing;
 
-  const payload = buildDefaultFeeStructurePayload(student);
+  // Now async since buildDefaultFeeStructurePayload is async
+  const payload = await buildDefaultFeeStructurePayload(student);
   return FeeStructure.create(payload);
 };
 

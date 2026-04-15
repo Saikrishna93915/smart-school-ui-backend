@@ -6,6 +6,7 @@ import Student from "../models/Student.js";
 import User from "../models/User.js";
 import FeeAudit from "../models/FeeAudit.js";
 import { convertToWords } from "../utils/numberToWords.js";
+import { getConfig, getFeeStructureForClass } from "../services/configService.js";
 
 // @desc    Get all fee structures
 // @route   GET /api/finance/fees/structures
@@ -177,11 +178,18 @@ export const createBulkFeeStructures = asyncHandler(async (req, res) => {
           });
 
           if (!existing) {
-            const baseFee = feeTemplate?.baseFee || 15000;
-            const transportFee = student.transport === "yes" ? (feeTemplate?.transportFee || 6000) : 0;
-            const activityFee = feeTemplate?.activityFee || 3500;
-            const examFee = feeTemplate?.examFee || 5000;
+            // DYNAMIC: Get fee structure from database
+            const className = student.class?.className || '10th Class';
+            const feeConfig = await getFeeStructureForClass(className);
+            
+            const baseFee = feeConfig?.baseFee || 15000;
+            const transportFee = student.transport === "yes" ? (feeConfig?.transportFee || 6000) : 0;
+            const activityFee = feeConfig?.activityFee || 3500;
+            const examFee = feeConfig?.examFee || 5000;
             const totalFee = baseFee + transportFee + activityFee + examFee;
+            
+            // DYNAMIC: Get academic year from config
+            const currentAcademicYear = await getConfig('academic.currentYear', academicYear || "2025-2026");
 
             const feeStructure = await FeeStructure.create({
               admissionNumber: student.admissionNumber,
@@ -189,7 +197,7 @@ export const createBulkFeeStructures = asyncHandler(async (req, res) => {
               studentName: `${student.student.firstName} ${student.student.lastName}`,
               className: student.class.className,
               section: student.class.section,
-              academicYear: academicYear || "2024-2025",
+              academicYear: currentAcademicYear,
               transportOpted: student.transport === "yes",
               transportFee: transportFee,
               feeComponents: [
@@ -888,6 +896,26 @@ export const processStudentPayment = asyncHandler(async (req, res) => {
       });
     }
 
+    // SECURITY: If requester is a parent, verify the student belongs to them
+    if (req.user.role === 'parent') {
+      const parentUser = await User.findById(req.user._id).select('children linkedId email').lean();
+      const allowedStudentIds = new Set();
+
+      if (parentUser?.children?.length) {
+        parentUser.children.forEach(id => allowedStudentIds.add(String(id)));
+      }
+      if (parentUser?.linkedId) {
+        allowedStudentIds.add(String(parentUser.linkedId));
+      }
+
+      if (!allowedStudentIds.has(String(studentId))) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied. You can only make payments for your own children.",
+        });
+      }
+    }
+
     // Get student
     const student = await Student.findById(studentId);
     if (!student) {
@@ -1001,7 +1029,7 @@ export const downloadReceiptPDF = asyncHandler(async (req, res) => {
   try {
     const { paymentId } = req.params;
 
-    const payment = await Payment.findById(paymentId);
+    const payment = await Payment.findById(paymentId).lean();
     if (!payment) {
       return res.status(404).json({
         success: false,
@@ -1009,20 +1037,28 @@ export const downloadReceiptPDF = asyncHandler(async (req, res) => {
       });
     }
 
-    // Return receipt data (for PDF generation, use pdfkit or similar)
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=receipt_${payment.receiptNumber}.json`
-    );
-
+    // Return complete receipt data for frontend rendering
     res.status(200).json({
-      receiptNumber: payment.receiptNumber,
-      amount: payment.amount,
-      paymentMethod: payment.paymentMethod,
-      paymentDate: payment.paymentDate,
-      studentName: payment.studentName,
-      admissionNumber: payment.admissionNumber,
+      success: true,
+      data: {
+        receiptNumber: payment.receiptNumber,
+        amount: payment.amount || 0,
+        paidAmount: payment.paidAmount || 0,
+        dueAmount: payment.dueAmount || 0,
+        paymentMethod: payment.paymentMethod,
+        paymentDate: payment.paymentDate || payment.createdAt,
+        studentName: payment.studentName,
+        admissionNumber: payment.admissionNumber,
+        className: payment.className,
+        section: payment.section,
+        academicYear: payment.academicYear,
+        description: payment.description,
+        transactionId: payment.transactionId,
+        referenceNo: payment.referenceNo,
+        collectedBy: payment.cashierName || payment.recordedByName || 'N/A',
+        breakdown: payment.breakdown || payment.feesPaid || [],
+        status: payment.status,
+      }
     });
   } catch (error) {
     res.status(500).json({
@@ -1110,6 +1146,178 @@ export const exportPaymentsCSV = asyncHandler(async (req, res) => {
     );
 
     res.status(200).send(csv);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// ========================
+// PARENT-SPECIFIC ENDPOINTS
+// ========================
+
+/**
+ * @desc    Get payment history for parent's children
+ * @route   GET /api/fees/history
+ * @access  Private (Parent/Student)
+ */
+export const getParentPaymentHistory = asyncHandler(async (req, res) => {
+  try {
+    let studentIds = [];
+
+    if (req.user.role === 'parent') {
+      // Resolve children from parent's user document
+      const parentUser = await User.findById(req.user._id).select('children linkedId email').lean();
+      if (parentUser?.children?.length) {
+        studentIds = parentUser.children.map(id => String(id));
+      } else if (parentUser?.linkedId) {
+        studentIds = [String(parentUser.linkedId)];
+      } else {
+        // Fallback: find by email
+        const email = parentUser?.email?.toLowerCase();
+        if (email) {
+          const students = await Student.find({
+            $or: [
+              { "parents.father.email": email },
+              { "parents.mother.email": email }
+            ],
+            status: { $ne: "deleted" }
+          }).lean();
+          studentIds = students.map(s => String(s._id));
+        }
+      }
+    } else if (req.user.role === 'student') {
+      studentIds = [String(req.user.linkedId || req.user._id)];
+    } else {
+      // Admin/accountant fallback - return all completed payments
+      const payments = await Payment.find({ status: "completed" }).sort("-paymentDate").limit(100).lean();
+      return res.status(200).json({ success: true, data: payments, count: payments.length });
+    }
+
+    if (studentIds.length === 0) {
+      return res.status(200).json({ success: true, data: [], count: 0, message: "No children linked" });
+    }
+
+    const payments = await Payment.find({
+      studentId: { $in: studentIds },
+      status: { $in: ["completed", "partial", "paid"] }
+    }).sort("-paymentDate").lean();
+
+    res.status(200).json({ success: true, data: payments, count: payments.length });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * @desc    Get receipts for parent's children
+ * @route   GET /api/fees/receipts
+ * @access  Private (Parent/Student)
+ */
+export const getParentReceipts = asyncHandler(async (req, res) => {
+  try {
+    let studentIds = [];
+
+    if (req.user.role === 'parent') {
+      const parentUser = await User.findById(req.user._id).select('children linkedId email').lean();
+      if (parentUser?.children?.length) {
+        studentIds = parentUser.children.map(id => String(id));
+      } else if (parentUser?.linkedId) {
+        studentIds = [String(parentUser.linkedId)];
+      } else {
+        const email = parentUser?.email?.toLowerCase();
+        if (email) {
+          const students = await Student.find({
+            $or: [
+              { "parents.father.email": email },
+              { "parents.mother.email": email }
+            ],
+            status: { $ne: "deleted" }
+          }).lean();
+          studentIds = students.map(s => String(s._id));
+        }
+      }
+    } else if (req.user.role === 'student') {
+      studentIds = [String(req.user.linkedId || req.user._id)];
+    }
+
+    if (studentIds.length === 0) {
+      return res.status(200).json({ success: true, data: [], count: 0, message: "No children linked" });
+    }
+
+    // Get all receipts linked to the student's payments
+    const payments = await Payment.find({
+      studentId: { $in: studentIds },
+      status: { $in: ["completed", "paid"] },
+      receiptNumber: { $ne: null }
+    }).sort("-paymentDate").lean();
+
+    // Format as receipts
+    const receipts = payments.map(p => ({
+      _id: String(p._id),
+      receiptNo: p.receiptNumber,
+      amount: p.amount || 0,
+      paymentMethod: p.paymentMethod,
+      date: p.paymentDate || p.createdAt,
+      status: "generated",
+      studentName: p.studentName,
+      className: p.className,
+      section: p.section,
+      description: p.description
+    }));
+
+    res.status(200).json({ success: true, data: receipts, count: receipts.length });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * @desc    Email receipt to parent
+ * @route   POST /api/fees/receipts/email/:paymentId
+ * @access  Private (Parent)
+ */
+export const emailReceipt = asyncHandler(async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { email } = req.body;
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: "Payment not found" });
+    }
+
+    // If parent, verify this payment belongs to their child
+    if (req.user.role === 'parent') {
+      const parentUser = await User.findById(req.user._id).select('children linkedId email').lean();
+      const allowedIds = new Set();
+      if (parentUser?.children?.length) parentUser.children.forEach(id => allowedIds.add(String(id)));
+      if (parentUser?.linkedId) allowedIds.add(String(parentUser.linkedId));
+
+      if (!allowedIds.has(String(payment.studentId))) {
+        return res.status(403).json({ success: false, message: "Access denied" });
+      }
+    }
+
+    // In a production system, you would use nodemailer here
+    // For now, return success with payment details
+    res.status(200).json({
+      success: true,
+      message: "Receipt would be emailed (email service not configured)",
+      data: {
+        receiptNumber: payment.receiptNumber,
+        amount: payment.amount,
+        studentName: payment.studentName
+      }
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
