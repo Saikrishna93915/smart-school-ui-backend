@@ -42,7 +42,7 @@ export const createTeacher = async (req, res) => {
 
     // ===== GENERATE DEFAULT PASSWORD FOR TEACHER =====
     const sequenceNumber = await getNextSequenceNumber(User, 'teacher');
-    const defaultPassword = generateDefaultPassword('teacher', sequenceNumber);
+    const defaultPassword = await generateDefaultPassword('teacher', sequenceNumber);
     console.log(`🔐 Generated default password for teacher: ${defaultPassword} (sequence: ${sequenceNumber})`);
 
     // ===== UNIFY THE DATA =====
